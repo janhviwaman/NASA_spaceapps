@@ -1,0 +1,11 @@
+{
+  "name": "Mars EVA HUD",
+  "short_name": "EVA HUD",
+  "description": "Phone-based AR/VR navigation HUD with a race-line path for Mars surface walks.",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#1a0c08",
+  "theme_color": "#1a0c08",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

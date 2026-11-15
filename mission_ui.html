@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lander terminal - Jezero surface ops</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a22; --card:#1a212b; --line:#2a3340; --txt:#e6ebf2; --dim:#8b97a8; --acc:#4dabf7;
+  --good:#2fbf71; --warn:#f2b01e; --bad:#ef5350; --purple:#b07cf0; --gold:#ffd43b;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;
+  background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:650;letter-spacing:.2px}
+.brand small{color:var(--dim);font-weight:400;margin-left:10px}
+.hdr-right{display:flex;gap:14px;align-items:center;font-size:12.5px;color:var(--dim)}
+.hdr-right a{color:var(--acc);text-decoration:none}
+.badge{padding:2px 8px;border-radius:10px;background:#2b3442;color:var(--txt);font-size:12px}
+.badge.syn{background:#4a3b12;color:var(--gold)}
+main{display:flex;height:calc(100% - 46px)}
+#mapwrap{position:relative;flex:1;min-width:0;background:#0a0d12;overflow:hidden}
+canvas#map{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:none}
+#readout{position:absolute;left:10px;top:10px;padding:6px 9px;background:rgba(14,17,22,.82);border:1px solid var(--line);
+  border-radius:6px;font:12px/1.5 ui-monospace,Consolas,monospace;pointer-events:none;min-width:250px}
+#readout b{color:var(--acc);font-weight:600}
+#toolbar{position:absolute;right:10px;top:10px;padding:8px 10px;background:rgba(14,17,22,.86);border:1px solid var(--line);
+  border-radius:6px;font-size:12.5px;display:flex;flex-direction:column;gap:3px}
+#toolbar .t{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-top:3px}
+#toolbar label{display:flex;gap:6px;align-items:center;cursor:pointer}
+#legend{position:absolute;left:10px;bottom:10px;padding:7px 10px;background:rgba(14,17,22,.86);border:1px solid var(--line);
+  border-radius:6px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;max-width:70%}
+#legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,13,18,.55);
+  font-size:15px;z-index:5}
+#busy div{padding:12px 20px;background:var(--card);border:1px solid var(--line);border-radius:8px}
+#msg{position:absolute;left:50%;top:12px;transform:translateX(-50%);padding:8px 14px;border-radius:6px;display:none;
+  max-width:60%;font-size:13px;z-index:6}
+#msg.err{background:#4a1d1d;border:1px solid var(--bad)} #msg.info{background:#16324a;border:1px solid var(--acc)}
+aside{width:430px;max-width:46vw;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);font-weight:600}
+.row{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}
+.row>label.k{width:104px;color:var(--dim);font-size:13px}
+select,input[type=number]{background:#0f141b;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:13px}
+input[type=range]{flex:1;min-width:120px;accent-color:var(--acc)}
+button{background:#263040;color:var(--txt);border:1px solid #38465a;border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer}
+button:hover{background:#2f3b4f} button:disabled{opacity:.45;cursor:default}
+button.primary{background:#1c6fb8;border-color:#2f8bd6;font-weight:600;padding:8px 16px}
+button.primary:hover{background:#2380d0}
+button.danger{background:#5a2323;border-color:#8a3a3a}
+.seg{display:flex;border:1px solid #38465a;border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:#1f2733;padding:5px 11px}
+.seg button.on{background:#1c6fb8;color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{font-size:12px;padding:4px 8px;text-align:left}
+.hint{color:var(--dim);font-size:12px}
+.val{font-variant-numeric:tabular-nums;color:var(--acc);min-width:84px;text-align:right}
+#verdict{padding:9px 12px;border-radius:7px;font-weight:650;margin-bottom:10px}
+#verdict.go{background:#143a26;border:1px solid var(--good);color:#8be8b3}
+#verdict.tight{background:#443610;border:1px solid var(--warn);color:#ffd77a}
+#verdict.nogo{background:#471c1c;border:1px solid var(--bad);color:#ff9d9b}
+#verdict.hold{background:#443610;border:1px solid var(--warn);color:#ffd77a}
+#verdict.shelter{background:#2f2250;border:1px solid var(--purple);color:#d3b8ff}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.stat{background:#10151c;border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.stat .l{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.stat .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat .s{color:var(--dim);font-size:11.5px}
+.bars .b{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12.5px}
+.bars .b span.n{width:112px;color:var(--dim)} .bars .track{flex:1;height:9px;background:#0f141b;border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+.bars .fill{height:100%} .bars .p{width:42px;text-align:right;font-variant-numeric:tabular-nums}
+#timeline{display:flex;height:14px;border-radius:4px;overflow:hidden;border:1px solid var(--line);margin:4px 0 2px}
+canvas.chart{width:100%;height:112px;display:block;background:#0f141b;border:1px solid var(--line);border-radius:6px}
+ul.list{margin:4px 0;padding-left:18px} ul.list li{margin:3px 0}
+.alert{border-left:3px solid var(--warn);padding:4px 8px;margin:5px 0;background:#241f10;border-radius:0 5px 5px 0;font-size:13px}
+.alert.bad{border-color:var(--bad);background:#2a1414} .alert.purple{border-color:var(--purple);background:#1f1830}
+table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums}
+th,td{padding:2px 6px;text-align:right;border-bottom:1px solid var(--line)} th{color:var(--dim);font-weight:500}
+details summary{cursor:pointer;color:var(--dim);font-size:12.5px;margin:4px 0}
+.empty{color:var(--dim);text-align:center;padding:26px 8px}
+.pill{display:inline-block;padding:0 7px;border-radius:9px;font-size:12px;margin-left:6px}
+
+/* ---------- lander terminal ---------- */
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;padding:8px 10px;background:#1a212b;border:1px solid var(--line);font-weight:600;letter-spacing:.4px}
+.tabs button.on{background:#0f3a2a;border-color:#2fbf71;color:#9af0c0}
+.term{border-color:#1f5a41;background:#0d1a15}
+.term-head{display:flex;justify-content:space-between;font:600 13px ui-monospace,Consolas,monospace;color:#7fe3ae;letter-spacing:1px;margin-bottom:6px}
+.term-head .dim{color:#4c8f6b;font-weight:400}
+.term-status{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.term-status .pill{margin:0;font:11px ui-monospace,Consolas,monospace;padding:1px 7px}
+.pill.ok{background:#12452f;color:#8be8b3}.pill.warn{background:#4a3b12;color:#ffd77a}.pill.info{background:#16324a;color:#9fd0ff}
+#stepper{display:flex;gap:4px;margin-bottom:8px}
+#stepper span{flex:1;text-align:center;font:600 10.5px ui-monospace,Consolas,monospace;padding:3px 0;border-radius:4px;background:#12201a;color:#4c8f6b;border:1px solid #1c3a2c}
+#stepper span.done{color:#7fe3ae;border-color:#2f7f58}#stepper span.now{background:#1c6fb8;color:#fff;border-color:#2f8bd6}
+#log{height:178px;overflow-y:auto;background:#08110d;border:1px solid #1c3a2c;border-radius:6px;padding:6px 8px;font:12.5px/1.45 ui-monospace,Consolas,monospace}
+#log .ln{margin:2px 0;white-space:pre-wrap;word-break:break-word}
+#log .ln b{font-weight:700;margin-right:6px}
+#log .crew b{color:#4dabf7}#log .crew{color:#cfe6ff}
+#log .ai b{color:#7fe3ae}#log .ai{color:#d3f7e2}
+#log .sys b{color:#8b97a8}#log .sys{color:#a9b4c3}
+#log .warn b{color:#ffd43b}#log .warn{color:#ffd77a}
+.qc,.site,.confirm{background:#10151c;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px}
+.qc .qh{font:600 11px ui-monospace,Consolas,monospace;color:#7fe3ae;letter-spacing:.8px;margin-bottom:5px}
+.qc .qg{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;font-size:13px}
+.qc .qg span{color:var(--dim)}
+.qc input[type=number]{width:70px}
+.site{cursor:pointer}.site:hover{border-color:#2f8bd6}.site.sel{border-color:var(--gold);background:#1d1a0b}
+.site .sh{display:flex;gap:8px;align-items:center}
+.site .num{width:22px;height:22px;border-radius:50%;background:#1c6fb8;color:#fff;font-weight:700;display:inline-flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+.site.sel .num{background:var(--gold);color:#000}
+.site .sc{margin-left:auto;color:var(--dim);font-size:12px}
+.site .sm{font-size:12.5px;color:#cfd6e0;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+.site .sr{font-size:12px;color:var(--dim)}
+.site.bad{opacity:.75;cursor:default}.site.bad .num{background:#555}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-color:var(--gold)}
+.term-input{display:flex;gap:6px;margin-top:8px;align-items:center}
+.term-input .prompt{font:700 13px ui-monospace,Consolas,monospace;color:#4dabf7}
+.term-input input{flex:1;background:#08110d;color:#e6ebf2;border:1px solid #2f7f58;border-radius:5px;padding:7px 9px;font:13px ui-monospace,Consolas,monospace}
+.term-events{margin-top:8px;font-size:12px;color:var(--dim)}
+.term-events button{margin:3px 3px 0 0;font-size:12px;padding:4px 8px}
+
+/* ---------- how the route was calculated ---------- */
+.xp{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.xp h3{margin:0 0 4px}
+.xp ol.steps{margin:6px 0 8px 18px;padding:0}.xp li{margin:6px 0;font-size:12.5px;line-height:1.45;color:#cfd6e0}.xp li b{color:#e6ebf2}
+.xrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.cc{display:inline-flex;align-items:center;gap:5px;margin:2px 10px 2px 0;font-size:12px}.cc i{width:10px;height:10px;border-radius:2px;display:inline-block}
+table.cmp{margin-top:6px}table.cmp td:first-child,table.cmp th:first-child{text-align:left}table.cmp tr.cur td{color:var(--gold)}
+#xHover{min-height:34px;font-size:12px;color:#cfd6e0;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">&#9650; LANDER TERMINAL <small>Jezero surface operations &middot; AI layer + path planner (Mars Surface Navigation System spec)</small></div>
+  <div class="hdr-right"><span id="demBadge" class="badge">loading&hellip;</span><a href="/classic">classic planner</a></div>
+</header>
+<main>
+  <section id="mapwrap">
+    <canvas id="map"></canvas>
+    <div id="readout">move the mouse over the map</div>
+    <div id="toolbar">
+      <div class="t">Map layers</div>
+      <label><input type="checkbox" data-layer="nogo_walk"> No-go on foot (red)</label>
+      <label><input type="checkbox" data-layer="nogo_rover"> No-go for rover (orange)</label>
+      <label><input type="checkbox" data-layer="slope"> Slope</label>
+      <label><input type="checkbox" data-layer="localizability"> Where position fixes are good</label>
+      <div class="t">Route</div>
+      <label>Colour by
+        <select id="colorBy"><option value="sigma">position confidence</option><option value="difficulty">difficulty</option><option value="margin">return margin</option></select></label>
+      <label><input type="checkbox" id="showHalo" checked> uncertainty halo (&plusmn;3&sigma;)</label>
+      <label><input type="checkbox" id="showWp"> waypoints</label>
+      <button id="fitBtn" style="margin-top:4px">Fit view to route</button>
+    </div>
+    <div id="legend"></div>
+    <div id="busy"><div id="busyTxt">Planning&hellip;</div></div>
+    <div id="msg"></div>
+  </section>
+
+  <aside>
+    <div class="tabs"><button class="on" data-tab="term">TERMINAL</button><button data-tab="manual">Manual planner</button></div>
+    <div id="tab-term">
+      <div class="card term">
+        <div class="term-head"><span>&#9670; LANDER TERMINAL</span><span class="dim">Jezero surface ops</span></div>
+        <div class="term-status">
+          <span class="pill ok">PLANNER ONLINE</span><span class="pill info" id="aiPill">AI LAYER</span>
+          <span class="pill warn" title="Spec SYS-11: one-way light delay to Earth is roughly 4-24 min">EARTH LINK: NONE &middot; all processing on board</span>
+        </div>
+        <div id="stepper"><span data-s="1">1 REQUEST</span><span data-s="2">2 SITES</span><span data-s="3">3 CONFIRM</span><span data-s="4">4 ROUTE</span><span data-s="5">5 EVENTS</span></div>
+        <div id="log"></div>
+        <div id="qcard"></div>
+        <div id="sitecards"></div>
+        <div id="confirmBar"></div>
+        <div class="term-input"><span class="prompt">CREW&gt;</span>
+          <input id="cmd" placeholder="Tell the system what you want to do&hellip;" autocomplete="off" spellcheck="false">
+          <button id="micBtn" title="Speak (uses the browser's speech recognition)" style="display:none">&#127908;</button>
+          <button id="sendBtn" class="primary" style="padding:6px 12px">Send</button></div>
+        <div class="chips" id="examples" style="margin-top:6px"></div>
+        <div class="term-events">En-route events (simulated):
+          <button id="evAdvance" title="Move the crew a quarter of the way along the route">&#9654; advance crew 25%</button>
+          <button id="evDust">&#9729; dust storm</button><button id="evSep">&#9762; SEP alert</button><button id="evHaz">&#9888; new hazard</button></div>
+        <div class="hint" id="catNote" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div id="tab-manual" style="display:none">
+    <div class="card">
+      <h3>Scenarios</h3>
+      <div class="chips" id="presets"></div>
+    </div>
+
+    <div class="card">
+      <h3>Route</h3>
+      <div class="row"><label class="k">Click the map to</label>
+        <div class="seg" id="placeSeg">
+          <button data-p="start" class="on">set start</button><button data-p="goal">set goal</button><button data-p="hazard">add hazard</button>
+        </div></div>
+      <div class="row"><label class="k">Start (E, N m)</label><span id="startTxt" class="val" style="text-align:left">lander</span>
+        <button id="startLander">at lander</button></div>
+      <div class="row"><label class="k">Goal (E, N m)</label><span id="goalTxt" class="val" style="text-align:left">click the map</span>
+        <select id="landmarks"><option value="">landmark&hellip;</option></select></div>
+      <div class="row"><label class="k">Travel mode</label>
+        <div class="seg" id="modeSeg"><button data-m="walk" class="on">walk (EVA)</button><button data-m="rover">rover</button></div></div>
+      <div class="row"><label class="k">Optimise for</label>
+        <select id="profile"></select></div>
+      <div class="hint" id="profileHint"></div>
+      <div class="row"><label class="k">Position error</label>
+        <input type="range" id="sigma" min="0" max="100" value="22"><span id="sigmaTxt" class="val"></span></div>
+      <div class="hint">How well the crew knows where they are at the start (1&sigma;). Hazard buffers grow with it.</div>
+      <div class="row"><label><input type="checkbox" id="refine" checked> fine-grid refinement</label>
+        <label><input type="checkbox" id="auto" checked> plan as soon as I set the goal</label></div>
+      <div class="row"><label><input type="checkbox" id="retEnf" checked> require a safe return to the lander</label></div>
+      <div class="hint">Real EVA rule (spec SYS-9): the crew must always be able to get back with margin, so points far from the lander are refused. Untick it to plan a plain start&#8594;goal path anywhere on the map.</div>
+      <div class="row">
+        <button class="primary" id="planBtn">Plan optimal route</button>
+        <button id="replanBtn" disabled title="Incremental D* Lite replan around the hazards you placed">Replan around hazards</button>
+        <button id="clearBtn">Clear</button></div>
+      <div id="hazList" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h3>Conditions</h3>
+      <div class="row"><label><input type="checkbox" id="dustOn"> Dust storm</label>
+        <input type="range" id="dustTau" min="1" max="6" step="0.5" value="4"><span id="dustTauTxt" class="val"></span></div>
+      <div class="row"><label class="k">peaks at</label><input type="range" id="dustPeak" min="0" max="240" step="5" value="35"><span id="dustPeakTxt" class="val"></span></div>
+      <div class="row"><label class="k">Local solar time</label>
+        <select id="hour"><option value="6">06:00 (dawn)</option><option value="9" selected>09:00</option><option value="12">12:00</option>
+          <option value="15">15:00</option><option value="18">18:00 (dusk)</option><option value="21">21:00 (night)</option></select></div>
+      <div class="row"><label><input type="checkbox" id="sepOn"> Solar particle event forecast</label>
+        <input type="range" id="sepMin" min="20" max="240" step="5" value="90"><span id="sepMinTxt" class="val"></span></div>
+      <div class="row"><button class="danger" id="sepNow" title="SEP alert at the start position: fastest route to shelter">&#9888; SEP alert now &rarr; route to shelter</button></div>
+    </div>
+
+    </div>
+    <div class="card" id="results"><div class="empty">Set a goal on the map (or pick a scenario) and the optimal route appears here.</div></div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+// ============================================================ state
+const S = {
+  meta: null, ext: null,
+  start: {x: 0, y: 0}, goal: null, hazards: [],
+  place: "start", mode: "walk", profile: "min_eta", plan: null, stale: false,
+  view: {cx: 0, cy: 0, k: 0.1}, layers: {}, imgs: {}, size: {w: 800, h: 600, dpr: 1},
+  probeT: 0, probe: null, cursor: null, busy: false
+};
+const $ = id => document.getElementById(id);
+const cv = $("map"), ctx = cv.getContext("2d");
+const COL = {high: "#2fbf71", medium: "#f2b01e", low: "#ef5350", lost: "#b07cf0",
+             easy: "#2fbf71", moderate: "#f2b01e", hard: "#ef5350"};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const level = s => s < 5 ? "high" : s < 30 ? "medium" : s < 300 ? "low" : "lost";
+const fmt = (v, d = 0) => Number(v).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d});
+
+// ============================================================ api
+async function api(path, body) {
+  const ac = new AbortController(), to = body ? setTimeout(() => ac.abort(), 300000) : null;
+  let r;
+  try { r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), signal: ac.signal} : {}); }
+  catch (e) { if (e.name === "AbortError") throw new Error("The planner took longer than 5 minutes, so I stopped waiting. Pick points closer together (or closer to the lander) and try again."); throw e; }
+  finally { if (to) clearTimeout(to); }
+  let j = null;
+  try { j = await r.json(); } catch (e) { /* not json */ }
+  if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+  return j;
+}
+function toast(text, kind = "info", ms = 6000) {
+  const m = $("msg"); m.textContent = text; m.className = kind; m.style.display = "block";
+  clearTimeout(toast.t); if (ms) toast.t = setTimeout(() => m.style.display = "none", ms);
+}
+function busy(on, txt) {
+  S.busy = on; $("busy").style.display = on ? "flex" : "none"; clearInterval(busy.t);
+  if (!on) return;
+  const t0 = Date.now(), base = txt || "Planning\u2026";
+  const tick = () => { const s = Math.round((Date.now() - t0) / 1000);
+    $("busyTxt").innerHTML = esc(base) + (s >= 3 ? ` <span class="hint">${s} s</span>` : "")
+      + (s >= 25 ? `<div class="hint" style="margin-top:6px;max-width:340px">Long routes on the real terrain take longer. If this passes a minute or two, press Clear and pick points closer together.</div>` : ""); };
+  tick(); busy.t = setInterval(tick, 1000);
+}
+
+// ============================================================ view / transforms
+const w2s = (x, y) => [(x - S.view.cx) * S.view.k + S.size.w / 2, S.size.h / 2 - (y - S.view.cy) * S.view.k];
+const s2w = (px, py) => [(px - S.size.w / 2) / S.view.k + S.view.cx, S.view.cy - (py - S.size.h / 2) / S.view.k];
+function fitBounds(x0, x1, y0, y1, pad = 0.12) {
+  const w = Math.max(x1 - x0, 50), h = Math.max(y1 - y0, 50);
+  S.view.k = Math.min(S.size.w / (w * (1 + 2 * pad)), S.size.h / (h * (1 + 2 * pad)));
+  S.view.cx = (x0 + x1) / 2; S.view.cy = (y0 + y1) / 2; draw();
+}
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  S.size = {w: r.width, h: r.height, dpr}; cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  draw();
+}
+
+// ============================================================ drawing
+function drawImg(name) {
+  const im = S.imgs[name]; if (!im || !im.complete || !im.naturalWidth) return;
+  ctx.imageSmoothingEnabled = !name.startsWith("nogo");   // terrain pictures smooth when zoomed in; the no-go masks stay crisp (they really are cells)
+  ctx.imageSmoothingQuality = "high";
+  const [e0, e1, n0, n1] = S.ext, [ax, ay] = w2s(e0, n1), [bx, by] = w2s(e1, n0);
+  ctx.drawImage(im, ax, ay, bx - ax, by - ay);
+}
+function ensureImg(name) {
+  if (S.imgs[name]) return;
+  const im = new Image(); S.imgs[name] = im; im.onload = draw; im.src = "/mission/layer/" + name;
+}
+function routeColor(i, R, mode) {
+  if (mode === "difficulty") return COL[R.difficulty[i]] || COL.easy;
+  if (mode === "margin") { const m = Math.max(0, Math.min(R.margin[i] / 0.35, 1)); return `hsl(${m * 125},75%,50%)`; }
+  return COL[level(R.sigma[i])];
+}
+function drawRoute() {
+  const P = S.plan; if (!P || (S.replay && S.replay.show && !S.replay.done)) return; const R = P.route, n = R.enu.length; if (n < 2) return;
+  const mode = $("colorBy").value, pts = R.enu.map(p => w2s(p[0], p[1]));
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if ($("showHalo").checked) {                       // uncertainty halo = the hazard buffer, +/-3 sigma
+    const off = document.createElement("canvas"); off.width = cv.width; off.height = cv.height;
+    const o = off.getContext("2d"); o.setTransform(S.size.dpr, 0, 0, S.size.dpr, 0, 0); o.lineCap = "round";
+    for (let i = 0; i < n - 1; i++) {
+      o.strokeStyle = routeColor(i, R, mode); o.lineWidth = Math.max(5, 2 * 3 * R.sigma[i] * S.view.k);
+      o.beginPath(); o.moveTo(...pts[i]); o.lineTo(...pts[i + 1]); o.stroke();
+    }
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.20; ctx.drawImage(off, 0, 0); ctx.restore();
+  }
+  ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(...pts[0]);
+  for (let i = 1; i < n; i++) ctx.lineTo(...pts[i]); ctx.stroke();
+  ctx.lineWidth = 4;
+  for (let i = 0; i < n - 1; i++) {
+    ctx.strokeStyle = routeColor(i, R, mode); ctx.beginPath(); ctx.moveTo(...pts[i]); ctx.lineTo(...pts[i + 1]); ctx.stroke();
+  }
+  if ($("showWp").checked) {
+    for (const w of P.waypoints_enu_m) { const [x, y] = w2s(w[0], w[1]); ctx.fillStyle = "#fff"; ctx.fillRect(x - 3, y - 3, 6, 6); }
+  }
+  for (const s of P.fix_stop_detail) {                // fix stops
+    const [x, y] = w2s(s.enu[0], s.enu[1]);
+    ctx.fillStyle = "#ffd43b"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 8, 0, 6.3); ctx.fill(); ctx.stroke();
+    label(x + 11, y - 9, `fix: ${s.method.replace("_", " ")} ${s.duration_s | 0}s`, "#ffd43b");
+  }
+  const tb = P.turn_back_point_enu_m;                  // turn-back marker (hidden when it coincides with the goal)
+  if (tb && !atGoal(P) && !P.verdict.startsWith("SHELTER")) {
+    const [x, y] = w2s(tb[0], tb[1]); ctx.fillStyle = "#ff922b"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x + 8, y); ctx.lineTo(x, y + 9); ctx.lineTo(x - 8, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    label(x + 11, y + 15, "turn-back", "#ff922b");
+  }
+}
+function atGoal(P) { const g = P.goal_enu, t = P.turn_back_point_enu_m; return Math.hypot(g[0] - t[0], g[1] - t[1]) < 40; }
+function label(x, y, text, color) {
+  ctx.font = "12px system-ui,sans-serif"; const w = ctx.measureText(text).width;
+  ctx.fillStyle = "rgba(10,13,18,.78)"; ctx.fillRect(x - 3, y - 11, w + 6, 16);
+  ctx.fillStyle = color; ctx.fillText(text, x, y + 1);
+}
+function marker(x, y, kind) {
+  const [sx, sy] = w2s(x, y); ctx.lineWidth = 2; ctx.strokeStyle = "#000";
+  if (kind === "lander") {
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(sx, sy - 9); ctx.lineTo(sx + 8, sy + 7); ctx.lineTo(sx - 8, sy + 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+    label(sx + 11, sy + 4, "lander / shelter", "#fff");
+  } else if (kind === "start") {
+    ctx.fillStyle = "#2fbf71"; ctx.beginPath(); ctx.arc(sx, sy, 9, 0, 6.3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#000"; ctx.font = "bold 11px system-ui"; ctx.fillText("S", sx - 3.5, sy + 4);
+  } else if (kind === "goal") {
+    ctx.fillStyle = "#fff"; ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const r = i % 2 ? 6 : 14, a = -1.5708 + i * 0.6283; ctx.lineTo(sx + r * Math.cos(a), sy + r * Math.sin(a)); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+}
+function drawHazards() {
+  for (const h of S.hazards) {
+    const [x, y] = w2s(h.x, h.y), r = Math.max(h.r * S.view.k, 5);
+    ctx.fillStyle = "rgba(239,83,80,.28)"; ctx.strokeStyle = "#ef5350"; ctx.setLineDash([5, 4]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.3); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#ef5350"; ctx.font = "bold 13px system-ui"; ctx.fillText("!", x - 3, y + 5);
+  }
+}
+function scaleBar() {
+  const target = 110 / S.view.k, p = Math.pow(10, Math.floor(Math.log10(target))), c = [1, 2, 5, 10].map(v => v * p).find(v => v >= target * 0.7) || p;
+  const px = c * S.view.k, x = S.size.w - 20 - px, y = S.size.h - 18;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(x + px, y - 4); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.font = "12px system-ui"; ctx.fillText(c >= 1000 ? (c / 1000) + " km" : c + " m", x + px / 2 - 14, y - 7);
+}
+function draw() {
+  if (!S.ext) return;
+  ctx.setTransform(S.size.dpr, 0, 0, S.size.dpr, 0, 0); ctx.clearRect(0, 0, S.size.w, S.size.h);
+  drawImg("base");
+  for (const l of ["slope", "localizability", "nogo_rover", "nogo_walk"]) if (S.layers[l]) drawImg(l);
+  if (!S.plan && S.goal) {                             // dashed preview
+    const [a, b] = w2s(S.start.x, S.start.y), [c, d] = w2s(S.goal.x, S.goal.y);
+    ctx.setLineDash([6, 6]); ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); ctx.setLineDash([]);
+  }
+  drawReplay(); drawAlts(); drawHazards(); drawRoute(); drawPins(); drawHover();
+  for (const s of S.meta.shelters) marker(s[0], s[1], "lander");
+  if (S.goal) marker(S.goal.x, S.goal.y, "goal");
+  marker(S.start.x, S.start.y, "start");
+  scaleBar(); legend();
+}
+function legend() {
+  const m = $("colorBy").value; let h = "";
+  const sw = (c, t) => `<span><i style="background:${c}"></i>${t}</span>`;
+  if (S.plan) {
+    if (m === "sigma") h = sw(COL.high, "high &lt;5 m") + sw(COL.medium, "medium &lt;30 m") + sw(COL.low, "low &lt;300 m");
+    else if (m === "difficulty") h = sw(COL.easy, "easy") + sw(COL.moderate, "moderate") + sw(COL.hard, "hard");
+    else h = sw("hsl(0,75%,50%)", "no margin") + sw("hsl(60,75%,50%)", "") + sw("hsl(125,75%,50%)", "&ge;35 % left");
+    h += sw("#ffd43b", "fix stop") + sw("#ff922b", "turn-back point");
+  }
+  if (S.replay && S.replay.show) h += '<span><i style="background:linear-gradient(90deg,#2fbf71,#f2b01e,#ef5350)"></i>search: colour = predicted position error at that state</span>';
+  if (S.alts) h += ALT_PROFILES.map(p => sw(ALT_COL[p], p.replace("_", " "))).join(""); else h = '<span class="hint">Route colour shows the predicted position confidence once planned.</span>';
+  $("legend").innerHTML = h;
+}
+
+// ============================================================ interaction
+let drag = null;
+cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); drag = {x: e.clientX, y: e.clientY, cx: S.view.cx, cy: S.view.cy, moved: false}; });
+cv.addEventListener("pointermove", e => {
+  const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (drag.moved) { S.view.cx = drag.cx - dx / S.view.k; S.view.cy = drag.cy + dy / S.view.k; draw(); }
+  }
+  S.cursor = s2w(px, py); readout();
+});
+cv.addEventListener("pointerup", e => {
+  const r = cv.getBoundingClientRect(), was = drag; drag = null;
+  if (was && !was.moved) clickMap(...s2w(e.clientX - r.left, e.clientY - r.top));
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault(); const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  const [wx, wy] = s2w(px, py), f = Math.exp(-e.deltaY * 0.0016);
+  S.view.k = Math.max(0.008, Math.min(S.view.k * f, 4));
+  S.view.cx = wx - (px - S.size.w / 2) / S.view.k; S.view.cy = wy + (py - S.size.h / 2) / S.view.k; draw();
+}, {passive: false});
+function inMap(x, y) { const [e0, e1, n0, n1] = S.ext; return x >= e0 && x <= e1 && y >= n0 && y <= n1; }
+function clickMap(x, y) {
+  if (!inMap(x, y)) { toast("That point is outside the terrain model.", "err", 2500); return; }
+  if (pinClick(x, y)) return;
+  x = Math.round(x); y = Math.round(y);
+  if (S.place === "start") { S.start = {x, y}; setStale(); }
+  else if (S.place === "goal") { S.goal = {x, y}; setStale(); if ($("auto").checked) planRoute(); }
+  else { S.hazards.push({x, y, r: 80}); setStale(); if (T.awaitHazard) { T.awaitHazard = false; hazardPlaced(); } }
+  updateTexts(); draw();
+}
+function readout() {
+  if (!S.cursor) return; const [x, y] = S.cursor, now = Date.now();
+  let t = `<b>E</b> ${fmt(x)} m  <b>N</b> ${fmt(y)} m`;
+  if (S.probe && !S.probe.out && S.probe.for) {
+    const p = S.probe; t += `<br><b>up</b> ${p.up} m  <b>slope</b> ${p.slope}&deg;  <b>rocks</b> ${p.rough} m`
+      + `<br><b>fix quality</b> ${Math.max(p.loc_skyline, p.loc_orbital).toFixed(2)}  <b>hazard</b> ${p.hazd >= 9999 ? "&gt;10 km" : p.hazd + " m"}`
+      + `<br>${p.nogo_walk ? '<span style="color:#ef5350">no-go on foot</span>' : "walkable"} &middot; ${p.nogo_rover ? '<span style="color:#f59f00">no-go for rover</span>' : "rover ok"}`;
+  }
+  $("readout").innerHTML = t;
+  if (now - S.probeT > 140 && inMap(x, y)) {
+    S.probeT = now;
+    api(`/mission/probe?x=${x.toFixed(1)}&y=${y.toFixed(1)}`).then(p => { p.for = true; S.probe = p; if (S.cursor && S.cursor[0] === x) readout(); }).catch(() => {});
+  }
+}
+
+// ============================================================ controls
+function sigmaVal() { return 2 * Math.pow(100, $("sigma").value / 100); }
+function updateTexts() {
+  $("startTxt").textContent = (S.start.x === 0 && S.start.y === 0) ? "lander (0, 0)" : `${fmt(S.start.x)}, ${fmt(S.start.y)}`;
+  $("goalTxt").textContent = S.goal ? `${fmt(S.goal.x)}, ${fmt(S.goal.y)}` : "click the map";
+  const s = sigmaVal(); $("sigmaTxt").innerHTML = `&plusmn;${s < 10 ? s.toFixed(1) : Math.round(s)} m <span class="pill" style="background:${COL[level(s)]}33;color:${COL[level(s)]}">${level(s)}</span>`;
+  $("dustTauTxt").textContent = $("dustOn").checked ? "opacity \u03c4 " + $("dustTau").value : "off";
+  $("dustPeakTxt").textContent = $("dustPeak").value + " min in";
+  $("sepMinTxt").textContent = $("sepOn").checked ? "onset in " + $("sepMin").value + " min" : "off";
+  $("replanBtn").disabled = !(S.hazards.length && S.goal);
+  $("hazList").innerHTML = S.hazards.length ? "Hazards: " + S.hazards.map((h, i) =>
+    `<span class="badge" style="margin-right:4px">${fmt(h.x)},${fmt(h.y)} r=<input type="number" value="${h.r}" min="20" max="500" step="10" style="width:56px" data-hz="${i}"> <a href="#" data-rm="${i}" style="color:var(--bad)">&times;</a></span>`).join("") : "";
+}
+function setStale() { if (S.plan) { S.stale = true; const n = $("staleNote"); if (n) n.style.display = "block"; } }
+function seg(id, attr, cb) {
+  $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+    [...$(id).children].forEach(c => c.classList.toggle("on", c === b)); cb(b.dataset[attr]); });
+}
+function setSeg(id, attr, val) { [...$(id).children].forEach(c => c.classList.toggle("on", c.dataset[attr] === val)); }
+seg("placeSeg", "p", v => S.place = v);
+seg("modeSeg", "m", v => { S.mode = v; setStale(); });
+$("profile").addEventListener("change", e => { S.profile = e.target.value; $("profileHint").textContent = S.meta.profiles[S.profile]; setStale(); });
+["sigma", "dustOn", "dustTau", "dustPeak", "sepOn", "sepMin", "hour", "refine", "retEnf"].forEach(id => $(id).addEventListener("input", () => { updateTexts(); setStale(); }));
+$("colorBy").addEventListener("change", draw); $("showHalo").addEventListener("change", draw); $("showWp").addEventListener("change", draw);
+document.querySelectorAll("[data-layer]").forEach(c => c.addEventListener("change", () => {
+  S.layers[c.dataset.layer] = c.checked; if (c.checked) ensureImg(c.dataset.layer); draw(); }));
+$("startLander").addEventListener("click", () => { S.start = {x: 0, y: 0}; setStale(); updateTexts(); draw(); });
+$("landmarks").addEventListener("change", e => { const l = S.meta.landmarks[+e.target.value]; if (!l) return;
+  S.goal = {x: l.enu[0], y: l.enu[1]}; e.target.value = ""; setStale(); updateTexts(); draw(); if ($("auto").checked) planRoute(); });
+$("fitBtn").addEventListener("click", fitRoute);
+$("clearBtn").addEventListener("click", () => { resetCrew(); S.plan = null; S.goal = null; S.hazards = []; S.stale = false; renderResults(); updateTexts(); draw(); });
+$("hazList").addEventListener("click", e => { const a = e.target.closest("[data-rm]"); if (!a) return; e.preventDefault(); S.hazards.splice(+a.dataset.rm, 1); setStale(); updateTexts(); draw(); });
+$("hazList").addEventListener("input", e => { const i = e.target.dataset.hz; if (i === undefined) return; S.hazards[+i].r = +e.target.value || 80; setStale(); draw(); });
+$("planBtn").addEventListener("click", () => planRoute());
+$("replanBtn").addEventListener("click", () => replanHazards());
+$("sepNow").addEventListener("click", () => sepNow());
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = {s: "start", g: "goal", h: "hazard"}[e.key.toLowerCase()]; if (k) { S.place = k; setSeg("placeSeg", "p", k); }
+  if (e.key === "Enter") planRoute();
+});
+
+// ============================================================ planning
+function buildReq() {
+  const sg = sigmaVal();
+  const req = {start_enu: [S.start.x, S.start.y], mode: S.mode, profile: S.profile, refine: $("refine").checked,
+    enforce_return: $("retEnf").checked, t_elapsed_s: S.tElapsed || 0, e_used_j: S.eUsed || 0,
+    localization: {covariance_enu_m2: [[sg * sg, 0, 0], [0, sg * sg, 0], [0, 0, 1]], confidence: level(sg)},
+    hazards: S.hazards.map(h => ({enu: [h.x, h.y], radius_m: h.r})),
+    weather: {start_hour: +$("hour").value, dust_events: $("dustOn").checked ? [[+$("dustPeak").value - 60, +$("dustPeak").value + 60, +$("dustTau").value]] : []},
+    sep: $("sepOn").checked ? {onset_min: +$("sepMin").value} : {}};
+  if (S.goal) req.goal_enu = [S.goal.x, S.goal.y];
+  return req;
+}
+async function run(label, fn) {
+  if (S.busy) return; busy(true, label);
+  try { await fn(); } catch (e) {
+    const tip = /too far from the shelter|spread over|round trip|get back to the shelter/.test(e.message) ? " Tip: untick \u201crequire a safe return to the lander\u201d to plan a plain start\u2192goal path." : "";
+    toast(e.message + tip, "err", 0); }
+  finally { busy(false); }
+}
+function planRoute() {
+  if (!S.goal) { toast("Click the map to set a goal first (or pick a scenario).", "info", 3500); return; }
+  return run("Planning the optimal route\u2026", async () => {
+    const t0 = performance.now(); const P = await api("/mission/plan", buildReq());
+    $("msg").style.display = "none"; setPlan(P, `planned in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  });
+}
+function replanHazards() {
+  return run("Replanning around hazards (D* Lite)\u2026", async () => {
+    const q = buildReq(); q.trigger = "new_hazard"; q.current_enu = q.start_enu;
+    const t0 = performance.now(); const r = await api("/mission/replan", q);
+    $("msg").style.display = "none"; setPlan(r.plan, `${r.info.response}, ${r.info.latency_s} s (limit 5 s)`);
+  });
+}
+function sepNow() {
+  return run("SEP alert: finding the fastest route to shelter\u2026", async () => {
+    const q = buildReq(); q.trigger = "sep_alert"; q.current_enu = q.start_enu; q.sep = {onset_min: +$("sepMin").value};
+    delete q.goal_enu; const r = await api("/mission/replan", q);
+    S.goal = null; $("msg").style.display = "none"; setPlan(r.plan, `${r.info.response}, ${r.info.latency_s} s`); updateTexts();
+  });
+}
+function setPlan(P, note) {
+  S.alts = null; S.replay = null; S.hover = null;
+  S.plan = P; S.stale = false; S.note = note; renderResults(); draw(); fitRoute();
+}
+function fitRoute() {
+  if (!S.plan) { fitBounds(...[S.ext[0], S.ext[1], S.ext[2], S.ext[3]], 0.02); return; }
+  const e = S.plan.route.enu, xs = e.map(p => p[0]), ys = e.map(p => p[1]);
+  fitBounds(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), 0.18);
+}
+
+// ============================================================ results
+function stat(l, v, s = "") { return `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`; }
+function renderResults() {
+  const box = $("results"), P = S.plan;
+  if (!P) { box.innerHTML = '<div class="empty">Set a goal on the map (or pick a scenario) and the optimal route appears here.</div>'; return; }
+  const v = P.verdict, chk = P.return_checked !== false,
+    cls = v.startsWith("NO-GO") ? "nogo" : v.includes("NOT checked") ? "tight" : v.startsWith("HOLD") ? "hold" : v.startsWith("SHELTER") ? (v.includes("ONSET") ? "nogo" : "shelter")
+    : v.includes("tight") ? "tight" : "go";
+  const dist = P.distance_km, eta = P.eta_min;
+  const rt = P.return_min != null ? P.return_min : null;
+  const sg = P.route.sigma, cl = P.confidence_at_goal;
+  let h = `<div id="verdict" class="${cls}">${esc(v)}<span style="font-weight:400;opacity:.8;margin-left:8px">[${P.mode}, ${esc(P.profile)}]</span></div>`;
+  h += `<div class="hint" style="margin:-4px 0 8px">${esc(S.note || "")}</div>`;
+  h += `<div id="staleNote" class="alert" style="display:${S.stale ? "block" : "none"}">Inputs changed since this route was planned. Press <b>Plan optimal route</b> to update it.</div>`;
+  h += `<div class="grid">`
+    + stat("Distance", fmt(dist, 2) + " km", "path length")
+    + stat("Travel time", fmt(eta, 0) + " min", `${fmt(eta / 60, 1)} h incl. ${P.fix_stops.length} fix stop${P.fix_stops.length === 1 ? "" : "s"}`)
+    + (v.startsWith("SHELTER")
+        ? stat("Shelter ETA", fmt(eta, 0) + " min", P.sep && P.sep.countdown_s != null ? `${fmt(P.sep.countdown_s / 60, 0)} min before SEP onset` : "no SEP forecast")
+        : !chk ? stat("Round trip", "not checked", "return rule switched off")
+        : stat("Round trip", rt != null ? fmt(eta + P.on_site_min + rt, 0) + " min" : "n/a", `+${P.on_site_min} min on site, ${rt != null ? fmt(rt, 0) : "?"} back`))
+    + stat("Energy", fmt(P.energy_kJ, 0) + " kJ", P.mode === "rover" ? "battery" : "metabolic")
+    + stat("Risk", fmt(P.risk_score, 2), "mean per metre")
+    + stat("Dose", fmt(P.dose_mSv, 3) + " mSv", "EVA + return")
+    + stat("Position at goal", `<span style="color:${COL[cl]}">${cl}</span>`, `\u00b1${fmt(sg[sg.length - 1], 1)} m (1\u03c3)`)
+    + stat("Min return margin", chk ? fmt(P.min_return_margin_frac * 100, 0) + " %" : "not checked", chk ? "of tightest resource" : "return rule switched off")
+    + stat("Turn-back point", (!chk || P.verdict.startsWith("SHELTER")) ? "n/a" : atGoal(P) ? "at the goal" : `${fmt(P.turn_back_point_enu_m[0])}, ${fmt(P.turn_back_point_enu_m[1])}`,
+           !chk ? "no return rule" : P.verdict.startsWith("SHELTER") ? "already heading home" : atGoal(P) ? "tightest margin is on arrival" : "E, N m: tightest return margin")
+    + `</div>`;
+  const cons = P.consumables_at_goal;
+  h += `<h3 style="margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)">${P.return_checked === false ? "Consumables left on arrival (return trip NOT reserved)" : "Consumables left at the goal"}</h3><div class="bars">`;
+  for (const k of Object.keys(cons)) { const p = cons[k] * 100, c = p < 25 ? COL.low : p < 50 ? COL.medium : COL.high;
+    h += `<div class="b"><span class="n">${esc(k)}</span><div class="track"><div class="fill" style="width:${p}%;background:${c}"></div></div><span class="p">${fmt(p, 0)}%</span></div>`; }
+  h += `</div>`;
+  const tl = P.confidence_timeline, tot = Math.max(...tl.map(t => t.to_m), 1);
+  h += `<h3 style="margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)">Predicted position confidence along the route</h3>`
+    + `<div id="timeline">${tl.map(t => `<div title="${t.level}: ${fmt(t.from_m)}\u2013${fmt(t.to_m)} m" style="flex:${Math.max(t.to_m - t.from_m, tot * 0.004)};background:${COL[t.level]}"></div>`).join("")}</div>`
+    + `<canvas class="chart" id="chartSig"></canvas>${chk ? '<canvas class="chart" id="chartMar" style="margin-top:6px;height:84px"></canvas>' : ""}`;
+  if (P.fix_stop_detail.length) {
+    h += `<h3 style="margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)">Fix stops (counted in the travel time)</h3><ul class="list">`
+      + P.fix_stop_detail.map(s => `<li><b>${esc(s.method.replace("_", " "))}</b> at ${fmt(s.dist_m / 1000, 2)} km, ${s.duration_s | 0} s: \u03c3 ${fmt(s.sigma_before, 0)} \u2192 ${fmt(s.sigma_after, 0)} m</li>`).join("") + `</ul>`;
+  }
+  if (P.alerts.length || P.violations.length) {
+    h += `<h3 style="margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)">Alerts</h3>`;
+    for (const v2 of P.violations) h += `<div class="alert bad">${esc(v2)}</div>`;
+    for (const a of P.alerts) h += `<div class="alert ${a.type === "sep" ? "purple" : a.type === "integrity" ? "bad" : ""}">${esc(a.msg)}</div>`;
+  }
+  if (P.sep && P.sep.countdown_s != null) h += `<div class="alert purple">${P.sep.countdown_s > 0
+    ? `Reaches shelter ${fmt(P.sep.countdown_s / 60, 0)} min before the SEP onset.`
+    : `SEP onset is ${fmt(-P.sep.countdown_s / 60, 0)} min BEFORE the crew can reach shelter.`} Dose to shelter ${P.sep.dose_to_shelter_mSv} mSv.</div>`;
+  const wp = P.waypoints_enu_m, ws = P.predicted_sigma_m;
+  h += `<details><summary>Waypoints (${wp.length}) &middot; spec 13 message</summary><table><tr><th>#</th><th>E (m)</th><th>N (m)</th><th>up (m)</th><th>\u03c3 (m)</th><th>next leg</th></tr>`
+    + wp.map((w, i) => `<tr><td>${i}</td><td>${fmt(w[0], 0)}</td><td>${fmt(w[1], 0)}</td><td>${fmt(w[2], 0)}</td><td>${fmt(ws[i], 1)}</td><td>${esc(P.segment_difficulty[i] || "")}</td></tr>`).join("")
+    + `</table><div style="margin-top:6px"><button id="dlBtn">Download planner message (JSON)</button></div></details>`;
+  h += explainSection(P);
+  box.innerHTML = h;
+  const dl = $("dlBtn"); if (dl) dl.onclick = () => { const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(P, null, 1)], {type: "application/json"})); a.download = "planner_message.json"; a.click(); };
+  chartSigma($("chartSig"), P); if (chk) chartMargin($("chartMar"), P);
+  bindExplain(P);
+}
+function chartBase(c, title) {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth || 380, h = c.clientHeight || 100;
+  c.width = w * dpr; c.height = h * dpr; const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0f141b"; g.fillRect(0, 0, w, h); g.font = "11px system-ui"; g.fillStyle = "#8b97a8"; g.fillText(title, 6, 12);
+  return {g, w, h, l: 38, r: 8, t: 18, b: 16};
+}
+function chartSigma(c, P) {
+  if (!c) return; const {g, w, h, l, r, t, b} = chartBase(c, "predicted position error 1\u03c3 (m, log scale)");
+  const R = P.route, D = R.dist_m[R.dist_m.length - 1] || 1, lo = Math.log10(2), hi = Math.log10(400);
+  const X = d => l + (w - l - r) * d / D, Y = s => t + (h - t - b) * (1 - (Math.log10(Math.max(s, 2)) - lo) / (hi - lo));
+  for (const [a, bb, col] of [[2, 5, COL.high], [5, 30, COL.medium], [30, 300, COL.low], [300, 400, COL.lost]]) {
+    g.fillStyle = col + "22"; g.fillRect(l, Y(bb), w - l - r, Y(a) - Y(bb)); }
+  g.strokeStyle = "#2a3340"; g.fillStyle = "#8b97a8";
+  for (const s of [5, 30, 300]) { g.beginPath(); g.moveTo(l, Y(s)); g.lineTo(w - r, Y(s)); g.stroke(); g.fillText(s, 8, Y(s) + 3); }
+  g.strokeStyle = "#e6ebf2"; g.lineWidth = 1.8; g.beginPath();
+  R.sigma.forEach((s, i) => { const x = X(R.dist_m[i]), y = Y(s); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  for (const s of P.fix_stop_detail) { g.fillStyle = "#ffd43b"; g.beginPath(); g.arc(X(s.dist_m), Y(s.sigma_after), 4, 0, 6.3); g.fill(); }
+  g.fillStyle = "#8b97a8"; g.fillText("0", l, h - 3); g.fillText(fmt(D / 1000, 1) + " km", w - 46, h - 3);
+}
+function chartMargin(c, P) {
+  if (!c) return; const {g, w, h, l, r, t, b} = chartBase(c, "return-to-shelter margin (% of tightest resource)");
+  const R = P.route, D = R.dist_m[R.dist_m.length - 1] || 1, X = d => l + (w - l - r) * d / D, Y = m => t + (h - t - b) * (1 - Math.max(0, Math.min(m, 1)));
+  g.strokeStyle = "#2a3340"; g.fillStyle = "#8b97a8";
+  for (const m of [0, 0.5, 1]) { g.beginPath(); g.moveTo(l, Y(m)); g.lineTo(w - r, Y(m)); g.stroke(); g.fillText(Math.round(m * 100), 12, Y(m) + 3); }
+  g.strokeStyle = COL.high; g.lineWidth = 1.8; g.beginPath();
+  R.margin.forEach((m, i) => { const x = X(R.dist_m[i]), y = Y(m); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+}
+
+// ============================================================ boot
+async function boot() {
+  try { S.meta = await api("/mission/meta"); } catch (e) { toast("Could not reach the planner: " + e.message, "err", 0); return; }
+  S.ext = S.meta.extent;
+  $("demBadge").textContent = S.meta.synthetic ? "SYNTHETIC terrain" : "Jezero CTX DEM 20 m"; if (S.meta.synthetic) $("demBadge").classList.add("syn");
+  $("profile").innerHTML = Object.keys(S.meta.profiles).map(k => `<option value="${k}">${k.replace("_", " ")}</option>`).join("");
+  $("profileHint").textContent = S.meta.profiles[S.profile];
+  $("landmarks").insertAdjacentHTML("beforeend", S.meta.landmarks.map((l, i) => `<option value="${i}">${esc(l.name)}</option>`).join(""));
+  $("presets").innerHTML = S.meta.presets.map((p, i) => `<button data-i="${i}">${esc(p.name)}</button>`).join("");
+  $("presets").addEventListener("click", e => { const b = e.target.closest("button"); if (b) applyPreset(S.meta.presets[+b.dataset.i]); });
+  S.imgs.base = new Image(); S.imgs.base.onload = () => { fitRoute(); }; S.imgs.base.src = "/mission/layer/base";
+  resize(); window.addEventListener("resize", resize); updateTexts(); renderResults(); fitBounds(S.ext[0], S.ext[1], S.ext[2], S.ext[3], 0.02);
+  initTerminal();
+}
+function applyPreset(p) {
+  resetCrew();
+  S.start = {x: p.start[0], y: p.start[1]}; S.hazards = [];
+  if (p.sep_alert) { S.goal = null; $("sepOn").checked = true; $("sepMin").value = p.sep_alert; }
+  else { S.goal = {x: p.goal[0], y: p.goal[1]}; $("sepOn").checked = false; }
+  S.mode = p.mode; setSeg("modeSeg", "m", p.mode);
+  const s = p.sigma || 5; $("sigma").value = Math.round(100 * Math.log(s / 2) / Math.log(100));
+  const d = !!p.dust_tau; $("dustOn").checked = d; if (d) { $("dustTau").value = p.dust_tau; $("dustPeak").value = p.dust_peak_min || 35; }
+  updateTexts(); draw();
+  if (p.sep_alert) sepNow(); else planRoute();
+}
+// ============================================================ how this route was calculated (explain.py)
+const XC = {time: "#4dabf7", energy: "#ffa94d", risk: "#ef5350", loc: "#b07cf0", stop: "#ffd43b"};
+const XNAME = {time: "time", energy: "energy", risk: "risk", loc: "localization penalty", stop: "fix stops"};
+const ALT_PROFILES = ["min_eta", "balanced", "safest"], ALT_COL = {min_eta: "#4dabf7", balanced: "#ffa94d", safest: "#b07cf0"};
+function explainSection(P) {
+  const X = P.explain, st = P.search_stats || {};
+  if (!X) return `<div class="alert">No step-by-step explanation is available for this plan.</div>`;
+  let h = `<div class="xp" id="explainBox"><h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)">How this route was calculated</h3><ol class="steps">`
+    + X.steps.map(s => `<li><b>${esc(s.title)}.</b> ${esc(s.text)}</li>`).join("") + `</ol>`
+    + `<div class="xrow">${X.search ? '<button id="xReplay">&#9654; Replay the search on the map</button>' : ""}<button id="xCompare">Compare priorities</button><span class="hint" id="xInfo"></span></div><div id="xComp"></div>`
+    + `<div class="hint" style="margin-top:8px">Where the cost comes from along the route (hover the chart)</div><canvas class="chart" id="chartCost" style="height:130px"></canvas>`
+    + `<div>${Object.keys(XC).filter(k => X.totals[k] > 0).map(k => `<span class="cc"><i style="background:${XC[k]}"></i>${XNAME[k]} ${X.pct[k]} % <span class="hint">(${fmt(X.totals[k])})</span></span>`).join("")}</div>`
+    + `<div id="xHover">hover the chart to inspect any point</div>`
+    + `<div class="hint" style="margin-top:6px">Position error vs the safety buffer it must stay inside (spec 9.2): the clearance to the nearest hazard (green) must stay above ${X.n_sigma} x the position error (red)</div><canvas class="chart" id="chartBuf" style="height:120px"></canvas>`;
+  if (X.tight.length) h += `<div class="hint" style="margin-top:4px">Tightest places: ` + X.tight.map(t => `${fmt(t.dist_m / 1000, 2)} km (clearance ${fmt(t.clearance_m)} m vs ${fmt(t.needed_m)} m needed, \u00b1${t.sigma_m} m)`).join("; ") + `</div>`;
+  h += `<div class="hint" style="margin-top:4px">${st.planning_s != null ? "Planning time " + st.planning_s + " s (spec SYS-2: \u2264 30 s). " : ""}${esc(st.hierarchy || st.engine || "")}</div></div>`;
+  return h;
+}
+function xPoint(P, j) {
+  const X = P.explain, R = P.route, s = X.series;
+  const cost = Object.keys(X.per_m).map(k => `${XNAME[k]} ${X.per_m[k][j].toFixed(2)}`).join(", ");
+  return `<b>${fmt(R.dist_m[j] / 1000, 2)} km</b>: grade ${s.grade_deg[j]}\u00b0, terrain slope ${s.slope_deg[j]}\u00b0, position error \u00b1${s.sigma_m[j]} m, clearance ${fmt(s.clear_m[j])} m vs buffer needed ${fmt(s.need_m[j])} m<br>cost per metre: ${cost}`;
+}
+function chartCost(P, hov) {
+  const c = $("chartCost"); if (!c) return; const X = P.explain, R = P.route, D = R.dist_m[R.dist_m.length - 1] || 1, n = R.dist_m.length;
+  const {g, w, h, l, r, t, b} = chartBase(c, "cost per metre (seconds-equivalent)");
+  const keys = ["time", "energy", "risk", "loc"].filter(k => X.totals[k] > 0), tot = Array.from({length: n}, (_, i) => keys.reduce((a, k) => a + X.per_m[k][i], 0));
+  const ymax = Math.max(...tot, 0.1) * 1.12, Xp = d => l + (w - l - r) * d / D, Yp = v => t + (h - t - b) * (1 - v / ymax);
+  let base = new Array(n).fill(0);
+  for (const k of keys) {
+    g.fillStyle = XC[k] + "cc"; g.beginPath();
+    for (let i = 0; i < n; i++) { const x = Xp(R.dist_m[i]), y = Yp(base[i] + X.per_m[k][i]); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    for (let i = n - 1; i >= 0; i--) g.lineTo(Xp(R.dist_m[i]), Yp(base[i]));
+    g.closePath(); g.fill(); for (let i = 0; i < n; i++) base[i] += X.per_m[k][i];
+  }
+  g.fillStyle = "#8b97a8"; g.fillText("0", 14, Yp(0) + 3); g.fillText(ymax.toFixed(1), 6, Yp(ymax) + 10);
+  for (const s of X.stop_cost) { g.strokeStyle = XC.stop; g.lineWidth = 2; g.beginPath(); g.moveTo(Xp(s.dist_m), t); g.lineTo(Xp(s.dist_m), h - b); g.stroke(); }
+  g.fillStyle = "#8b97a8"; g.fillText("0", l, h - 3); g.fillText(fmt(D / 1000, 1) + " km", w - 46, h - 3);
+  if (hov != null) { g.strokeStyle = "#fff"; g.lineWidth = 1; g.beginPath(); g.moveTo(Xp(R.dist_m[hov]), t); g.lineTo(Xp(R.dist_m[hov]), h - b); g.stroke(); }
+  c._geo = {l, r, w, D};
+}
+function chartBuf(P, hov) {
+  const c = $("chartBuf"); if (!c) return; const X = P.explain, R = P.route, s = X.series, D = R.dist_m[R.dist_m.length - 1] || 1, n = R.dist_m.length;
+  const {g, w, h, l, r, t, b} = chartBase(c, "metres");
+  const ymax = Math.max(60, Math.min(Math.max(...s.clear_m), 4 * Math.max(...s.need_m) + 40)), Xp = d => l + (w - l - r) * d / D, Yp = v => t + (h - t - b) * (1 - Math.min(v, ymax) / ymax);
+  g.fillStyle = "rgba(239,83,80,.22)"; g.beginPath(); g.moveTo(Xp(0), Yp(0));
+  for (let i = 0; i < n; i++) g.lineTo(Xp(R.dist_m[i]), Yp(s.need_m[i])); g.lineTo(Xp(D), Yp(0)); g.closePath(); g.fill();
+  g.strokeStyle = "#ef5350"; g.lineWidth = 1.6; g.beginPath(); s.need_m.forEach((v, i) => { const x = Xp(R.dist_m[i]), y = Yp(v); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  g.strokeStyle = "#2fbf71"; g.lineWidth = 1.8; g.beginPath(); s.clear_m.forEach((v, i) => { const x = Xp(R.dist_m[i]), y = Yp(v); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  for (const tp of X.tight) { g.fillStyle = "#ffd43b"; g.beginPath(); g.arc(Xp(tp.dist_m), Yp(tp.clearance_m), 4, 0, 6.3); g.fill(); }
+  g.fillStyle = "#8b97a8"; g.fillText("0", 14, Yp(0) + 3); g.fillText(Math.round(ymax), 6, Yp(ymax) + 10); g.fillText("0", l, h - 3); g.fillText(fmt(D / 1000, 1) + " km", w - 46, h - 3);
+  if (hov != null) { g.strokeStyle = "#fff"; g.lineWidth = 1; g.beginPath(); g.moveTo(Xp(R.dist_m[hov]), t); g.lineTo(Xp(R.dist_m[hov]), h - b); g.stroke(); }
+}
+function bindExplain(P) {
+  const X = P.explain; if (!X) return;
+  const R = P.route, redraw = j => { chartCost(P, j); chartBuf(P, j); };
+  redraw(null);
+  const cc = $("chartCost"), cb = $("chartBuf");
+  const idxAt = (c, ev) => { const g = c._geo; if (!g) return null; const rc = c.getBoundingClientRect(), px = ev.clientX - rc.left;
+    const d = Math.max(0, Math.min(1, (px - g.l) / Math.max(g.w - g.l - g.r, 1))) * g.D; let best = 0, bd = 1e18;
+    for (let i = 0; i < R.dist_m.length; i++) { const e = Math.abs(R.dist_m[i] - d); if (e < bd) { bd = e; best = i; } } return best; };
+  const mv = ev => { const j = idxAt(cc, ev); if (j == null) return; S.hover = j; redraw(j); $("xHover").innerHTML = xPoint(P, j); draw(); };
+  const lv = () => { S.hover = null; redraw(null); $("xHover").textContent = "hover the chart to inspect any point"; draw(); };
+  cc.addEventListener("mousemove", mv); cc.addEventListener("mouseleave", lv);
+  cb.addEventListener("mousemove", ev => { cc._geo = cc._geo || {}; const j = idxAt(cc, ev); if (j == null) return; S.hover = j; redraw(j); $("xHover").innerHTML = xPoint(P, j); draw(); });
+  cb.addEventListener("mouseleave", lv);
+  if ($("xReplay")) $("xReplay").onclick = toggleReplay;
+  $("xCompare").onclick = comparePriorities;
+}
+function drawHover() {
+  if (S.hover == null || !S.plan) return; const p = S.plan.route.enu[S.hover]; if (!p) return; const [x, y] = w2s(p[0], p[1]);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 9, 0, 6.3); ctx.stroke();
+  ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, 11, 0, 6.3); ctx.stroke();
+}
+// ---- replay of the A* search: the (cell, position-error) states in the order they were expanded
+const LEVEL_COL = k => `hsl(${Math.round(125 - 125 * k)},75%,52%)`;
+function toggleReplay() {
+  const P = S.plan, sr = P && P.explain && P.explain.search; if (!sr) return;
+  if (S.replay && S.replay.show && S.replay.done) { S.replay = null; $("xReplay").innerHTML = "&#9654; Replay the search on the map"; $("xInfo").textContent = ""; draw(); return; }
+  // the explored states are painted into one raster (a pixel per planning cell) that is then drawn smoothly: fine at any zoom,
+  // instead of thousands of hard squares. When the kernel thinned the record (every Nth state), each state is painted a little wider.
+  const cvr = document.createElement("canvas"); cvr.width = sr.w; cvr.height = sr.h;
+  S.replay = {show: true, done: false, i: 0, n: sr.cells.length, cv: cvr, g: cvr.getContext("2d"), painted: 0, splat: Math.max(1, Math.ceil(Math.sqrt(sr.step)))};
+  const step = Math.max(1, Math.ceil(S.replay.n / 150)); $("xReplay").textContent = "\u25a0 Skip to the result"; $("xInfo").textContent = "";
+  fitBoundsToSearch(sr);
+  const tick = () => {
+    const R = S.replay; if (!R || !R.show) return;
+    R.i = Math.min(R.n, R.i + step); const done = R.i >= R.n; paintReplay(R, sr);
+    if (done) { R.done = true; $("xReplay").textContent = "Hide the search"; $("xInfo").textContent = `${fmt(sr.expanded)} states expanded` + (sr.step > 1 ? ` (every ${sr.step}th shown)` : "") + "; colour = predicted position error"; }
+    else $("xInfo").textContent = `${fmt(Math.round(R.i / R.n * sr.expanded))} of ${fmt(sr.expanded)} states`;
+    draw(); if (!done) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+function paintReplay(R, sr) {
+  const g = R.g, K_ = sr.sigma_levels.length, s = R.splat, off = Math.floor((s - 1) / 2); let last = -1;
+  for (; R.painted < R.i; R.painted++) {
+    const l = sr.levels[R.painted];
+    if (l !== last) { g.fillStyle = LEVEL_COL(l / Math.max(K_ - 1, 1)); last = l; }
+    const c = sr.cells[R.painted], rr = Math.floor(c / sr.w), cc = c - rr * sr.w; g.fillRect(cc - off, rr - off, s, s);
+  }
+}
+function fitBoundsToSearch(sr) {
+  const xs = [sr.e0, sr.e0 + sr.w * sr.res], ys = [sr.n0, sr.n0 - sr.h * sr.res];
+  const R = S.plan.route.enu, rx = R.map(p => p[0]), ry = R.map(p => p[1]);
+  fitBounds(Math.min(...rx) - 300, Math.max(...rx) + 300, Math.min(...ry) - 300, Math.max(...ry) + 300, 0.12);
+}
+function drawReplay() {
+  const R = S.replay, P = S.plan; if (!R || !R.show || !P || !P.explain || !P.explain.search) return; const sr = P.explain.search;
+  const [x0, y0] = w2s(sr.e0 - sr.res / 2, sr.n0 + sr.res / 2);                  // top-left corner of window cell (0, 0)
+  ctx.imageSmoothingEnabled = true; ctx.globalAlpha = R.done ? 0.4 : 0.75;
+  ctx.drawImage(R.cv, x0, y0, sr.w * sr.res * S.view.k, sr.h * sr.res * S.view.k); ctx.globalAlpha = 1;
+  if (!R.done) {                                                                  // the wavefront: the most recently expanded states
+    const px = Math.max(sr.res * S.view.k, 2.5); ctx.fillStyle = "#fff";
+    for (let q = Math.max(0, R.i - 150); q < R.i; q++) { const c = sr.cells[q], rr = Math.floor(c / sr.w), cc = c - rr * sr.w;
+      const [x, y] = w2s(sr.e0 + cc * sr.res, sr.n0 - rr * sr.res); ctx.fillRect(x - px / 2, y - px / 2, px, px); }
+  }
+}
+// ---- compare priorities: the same trip with each profile
+async function comparePriorities() {
+  if (!S.plan || !S.goal) { $("xInfo").textContent = "Plan a route to a goal first."; return; }
+  await run("Planning the same trip with each priority\u2026", async () => {
+    const q = buildReq(); const r = await api("/mission/compare", q); S.alts = r.alternatives; draw();
+    const cur = S.plan.profile;
+    $("xComp").innerHTML = `<table class="cmp"><tr><th>priority</th><th>km</th><th>min</th><th>risk</th><th>clearance</th><th>fix stops</th></tr>` + r.alternatives.map(a => a.ok
+      ? `<tr class="${a.profile === cur ? "cur" : ""}"><td><span style="color:${ALT_COL[a.profile]}">&#9632;</span> ${a.profile.replace("_", " ")}</td><td>${a.distance_km}</td><td>${fmt(a.eta_min, 0)}</td><td>${a.risk_score}</td><td>${fmt(a.min_clearance_m)} m</td><td>${a.fix_stops}</td></tr>`
+      : `<tr><td>${a.profile}</td><td colspan="5">${esc(a.error)}</td></tr>`).join("") + `</table><div class="hint">Same trip, same conditions: a higher weight on risk and localization buys clearance with distance and time.</div>`;
+  });
+}
+function drawAlts() {
+  if (!S.alts) return;
+  for (const a of S.alts) { if (!a.ok) continue; ctx.strokeStyle = ALT_COL[a.profile]; ctx.lineWidth = 3; ctx.setLineDash([9, 6]); ctx.beginPath();
+    a.route.forEach((p, i) => { const [x, y] = w2s(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); ctx.setLineDash([]); }
+}
+function firstSentence(t) { const m = t.match(/^.*?[.!?](\s|$)/); return m ? m[0].trim() : t; }
+function showExplain() {
+  if (!S.plan || !S.plan.explain) { tlog("sys", "There is no route to explain yet. Ask for one first."); return; }
+  S.plan.explain.steps.forEach((s, i) => tlog("sys", `${i + 1}. ${s.title}: ${firstSentence(s.text)}`));
+  const el = $("explainBox"); if (el && el.scrollIntoView) el.scrollIntoView({behavior: "smooth", block: "start"});
+  if (S.plan.explain.search) toggleReplay();
+}
+
+// ============================================================ lander terminal (AI layer front end)
+const T = {query: null, sites: [], unreachable: [], chosen: null, modeUsed: "walk", step: 0, budget: null, awaitHazard: false, progress: 0, tab: "term"};
+function resetCrew() { S.tElapsed = 0; S.eUsed = 0; T.progress = 0; }
+function tlog(who, text) {
+  const d = document.createElement("div"); d.className = "ln " + who;
+  const tag = {crew: "CREW&gt;", ai: "AI&gt;", sys: "SYS&gt;", warn: "!!"}[who];
+  d.innerHTML = `<b>${tag}</b>` + esc(text); $("log").appendChild(d); $("log").scrollTop = $("log").scrollHeight;
+}
+function setStep(n) { T.step = n; document.querySelectorAll("#stepper span").forEach(e => { const k = +e.dataset.s; e.className = k < n ? "done" : k === n ? "now" : ""; }); }
+function setTab(t) {
+  T.tab = t; document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("tab-term").style.display = t === "term" ? "block" : "none"; $("tab-manual").style.display = t === "manual" ? "block" : "none";
+}
+function pinClick(x, y) {
+  if (T.tab !== "term" || S.plan || !T.sites.length) return false;
+  let best = -1, bd = 18 / S.view.k;
+  T.sites.forEach((s, i) => { const d = Math.hypot(s.enu[0] - x, s.enu[1] - y); if (d < bd) { bd = d; best = i; } });
+  if (best < 0) return false; chooseSite(best); return true;
+}
+function drawPins() {
+  if (S.plan) return;                                  // once a route exists the goal star replaces the pins
+  const items = T.sites.map((s, i) => ({s, i, ok: true})).concat(T.unreachable.map(s => ({s, i: -1, ok: false})));
+  for (const p of items) {
+    const [x, y] = w2s(p.s.enu[0], p.s.enu[1]), chosen = p.ok && T.chosen === p.i;
+    ctx.beginPath(); ctx.arc(x, y, chosen ? 14 : 11, 0, 6.3);
+    ctx.fillStyle = p.ok ? (chosen ? "#ffd43b" : "#1c6fb8") : "rgba(95,103,115,.92)"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = chosen ? "#fff" : "#000"; ctx.stroke();
+    ctx.fillStyle = p.ok ? (chosen ? "#000" : "#fff") : "#ddd"; ctx.font = "bold 12px system-ui"; ctx.fillText(p.ok ? String(p.i + 1) : "\u00d7", x - 3.5, y + 4.5);
+    label(x + 16, y + 4, p.s.name, p.ok ? "#cfe6ff" : "#9aa4b2");
+  }
+}
+function modeWord(m) { return m === "rover" ? "by rover" : "on foot"; }
+function renderQuery() {
+  const q = T.query; if (!q) { $("qcard").innerHTML = ""; return; }
+  $("qcard").innerHTML = `<div class="qc"><div class="qh">UNDERSTOOD REQUEST <span class="hint">schema-validated &middot; edit and update</span></div><div class="qg">`
+    + `<span>task</span><b>${esc((q.task || "").replace("_", " "))}</b>`
+    + `<span>targets</span><b>${q.target_features.length ? esc(q.target_features.join(", ")) : "&mdash;"}</b>`
+    + `<span>area</span><b>${esc(q.area_hint || "anywhere")}</b>`
+    + `<span>time budget</span><span><input type="number" id="qTime" min="10" max="600" step="5" value="${q.time_budget_min || ""}" placeholder="180"> min</span>`
+    + `<span>travel</span><select id="qMode"><option value="">auto (foot, then rover)</option><option value="walk"${q.mode === "walk" ? " selected" : ""}>on foot</option><option value="rover"${q.mode === "rover" ? " selected" : ""}>rover</option></select>`
+    + `<span>optimise for</span><select id="qProf"><option value="">min eta</option><option value="balanced"${q.profile === "balanced" ? " selected" : ""}>balanced</option><option value="safest"${q.profile === "safest" ? " selected" : ""}>safest</option></select>`
+    + `</div><div style="margin-top:7px"><button id="qUpdate">Update sites</button></div></div>`;
+  $("qUpdate").onclick = () => { T.query.time_budget_min = +$("qTime").value || null; T.query.mode = $("qMode").value || null; T.query.profile = $("qProf").value || null; findSites(); };
+}
+function siteCard(s, i, ok) {
+  const m = (x, d = 0) => x == null ? "?" : fmt(x, d);
+  let h = `<div class="site${ok ? "" : " bad"}" data-i="${ok ? i : -1}"><div class="sh"><span class="num">${ok ? i + 1 : "&times;"}</span><b>${esc(s.name)}</b>`
+    + `<span class="sc">${ok ? "score " + s.score.toFixed(2) + " &middot; science " + s.science_score.toFixed(2) : "not reachable"}</span></div>`;
+  if (ok) h += `<div class="sm">${m(s.distance_km, 1)} km &middot; ETA ${m(s.eta_min)} min &middot; round trip ${m(s.round_trip_min)} of ${T.budget} min &middot; fixes ${s.localizability >= 0.5 ? "good" : s.localizability >= 0.25 ? "fair" : "poor"} &middot; ${s.hard_sections} hard section(s) &middot; ${s.fix_stops} fix stop(s)</div>`;
+  h += `<div class="sr">${esc(s.reasoning)}</div>`;
+  if (!ok && s.rover_option) h += `<div class="sm">by rover: ${m(s.rover_option.distance_km, 1)} km, ETA ${m(s.rover_option.eta_min)} min, round trip ${m(s.rover_option.round_trip_min)} min <button data-rover="1">use the rover</button></div>`;
+  return h + `</div>`;
+}
+function renderSites() {
+  let h = T.sites.map((s, i) => siteCard(s, i, true)).join("");
+  if (T.unreachable.length) h += `<details style="margin-top:6px"><summary>${T.unreachable.length} more not reachable within the limits</summary>${T.unreachable.map(s => siteCard(s, -1, false)).join("")}</details>`;
+  $("sitecards").innerHTML = h;
+  $("sitecards").querySelectorAll(".site:not(.bad)").forEach(e => e.onclick = () => chooseSite(+e.dataset.i));
+  $("sitecards").querySelectorAll("[data-rover]").forEach(b => b.onclick = ev => { ev.stopPropagation(); T.query.mode = "rover"; renderQuery(); tlog("crew", "use the rover"); findSites(); });
+}
+function fitSites() {
+  const pts = T.sites.concat(T.unreachable).map(s => s.enu).concat([[S.start.x, S.start.y]]);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); fitBounds(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), 0.2);
+}
+async function findSites() {
+  if (!T.query) return;
+  S.plan = null; T.chosen = null; $("confirmBar").innerHTML = ""; renderResults();
+  await run("Searching candidate sites and running the planner on each\u2026", async () => {
+    const q = buildReq();
+    const r = await api("/ai/sites", {query: T.query, start_enu: [S.start.x, S.start.y], localization: q.localization, weather: q.weather, sep: q.sep, hazards: q.hazards});
+    T.sites = r.sites; T.unreachable = r.unreachable; T.modeUsed = r.mode_used; T.budget = r.budget_min; T.query = r.query;
+    $("msg").style.display = "none";
+    (r.notes || []).forEach(n => tlog(/GUARDRAIL/.test(n) ? "warn" : "sys", n)); tlog("sys", r.summary);
+    renderQuery(); renderSites(); setStep(T.sites.length ? 2 : 1); fitSites(); draw();
+  });
+}
+function chooseSite(i) {
+  if (i < 0 || i >= T.sites.length) { tlog("sys", `There is no option ${i + 1}. Pick 1\u2013${T.sites.length}.`); return; }
+  T.chosen = i; const s = T.sites[i]; S.goal = {x: Math.round(s.enu[0]), y: Math.round(s.enu[1])};
+  document.querySelectorAll("#sitecards .site").forEach(e => e.classList.toggle("sel", +e.dataset.i === i));
+  $("confirmBar").innerHTML = `<div class="confirm"><span>Selected <b>#${i + 1} ${esc(s.name)}</b> ${modeWord(T.modeUsed)}.</span><button class="primary" id="cfBtn">CONFIRM ROUTE</button><button id="cxBtn">Cancel</button></div>`;
+  $("cfBtn").onclick = () => confirmRoute(); $("cxBtn").onclick = () => { T.chosen = null; $("confirmBar").innerHTML = ""; renderSites(); draw(); };
+  tlog("sys", `Selected #${i + 1} ${s.name}. Confirm to plan the route (crew can still cancel).`); setStep(3); draw();
+}
+function routeLine(P) {
+  const n = P.fix_stops.length, sg = P.route.sigma[P.route.sigma.length - 1];
+  return `${fmt(P.distance_km, 1)} km, ${fmt(P.eta_min, 0)} min, position confidence at the goal: ${P.confidence_at_goal} (\u00b1${fmt(sg, 0)} m), ${n} fix stop${n === 1 ? "" : "s"}`
+    + (P.return_checked !== false && P.min_return_margin_frac != null ? `, return margin ${fmt(P.min_return_margin_frac * 100, 0)} %` : "") + `. ${P.verdict}.`;
+}
+async function confirmRoute() {
+  if (T.chosen == null) { tlog("sys", "Select a site first (say 'option 1' or click a site pin)."); return; }
+  const s = T.sites[T.chosen]; resetCrew();
+  S.goal = {x: Math.round(s.enu[0]), y: Math.round(s.enu[1])}; S.mode = T.modeUsed; setSeg("modeSeg", "m", S.mode);
+  S.profile = T.query.profile || "min_eta"; $("profile").value = S.profile;
+  const sg = sigmaVal(); tlog("sys", `Localization: cold start from the surveyed lander pose, \u00b1${sg < 10 ? sg.toFixed(1) : Math.round(sg)} m (${level(sg)}).`);
+  setStep(4); $("confirmBar").innerHTML = "";
+  await planRoute();
+  if (S.plan) {
+    tlog(S.plan.verdict.startsWith("NO-GO") || S.plan.verdict.startsWith("HOLD") ? "warn" : "sys", "Route ready: " + routeLine(S.plan));
+    S.plan.alerts.forEach(a => tlog("warn", a.msg)); S.plan.violations.forEach(v => tlog("warn", v));
+    tlog("sys", "Say 'explain' (or press 'Replay the search' under the route) to see how this route was calculated.");
+    setStep(5);
+  }
+}
+// ---- en-route events (spec section 2, steps 7-10)
+function evAdvance() {
+  if (!S.plan) { tlog("sys", "Plan a route first."); return; }
+  const R = S.plan.route, total = R.dist_m[R.dist_m.length - 1], target = Math.min(T.progress + 0.25 * total, 0.95 * total);
+  let idx = R.dist_m.findIndex(d => d >= target); if (idx < 0) idx = R.dist_m.length - 1;
+  S.start = {x: R.enu[idx][0], y: R.enu[idx][1]}; S.tElapsed = R.t_s[idx]; S.eUsed = R.e_j[idx]; T.progress = R.dist_m[idx];
+  const sg = R.sigma[idx]; $("sigma").value = Math.max(0, Math.min(100, Math.round(100 * Math.log(Math.max(sg, 2) / 2) / Math.log(100))));
+  updateTexts(); draw();
+  tlog("sys", `Crew advanced to ${fmt(T.progress / 1000, 2)} km along the route; ${fmt(S.tElapsed / 60, 0)} min elapsed; position confidence \u00b1${fmt(sg, 1)} m (${level(sg)}).`);
+}
+async function replanEvent(trigger, intro, onset) {
+  if (!S.plan || (!S.goal && trigger !== "sep_alert")) { tlog("sys", "Plan a route first, then simulate an event."); return; }
+  const oldRem = S.plan.eta_min - (S.tElapsed || 0) / 60; tlog("sys", intro);
+  await run("Replanning from the crew's position\u2026", async () => {
+    const q = buildReq(); q.trigger = trigger; q.current_enu = q.start_enu;
+    if (S.goal) q.goal_enu = [S.goal.x, S.goal.y];
+    if (trigger === "sep_alert") { q.sep = {onset_min: onset}; delete q.goal_enu; }
+    const r = await api("/mission/replan", q); const P = r.plan; S.plan = P; S.stale = false; S.note = r.info.response + `, ${r.info.latency_s} s (limit 5 s)`;
+    if (trigger === "sep_alert") S.goal = null;
+    renderResults(); draw();
+    if (trigger === "sep_alert") tlog("warn", `SEP: fastest route to shelter, ${fmt(P.distance_km, 1)} km, ETA ${fmt(P.eta_min, 0)} min` + (P.sep && P.sep.countdown_s != null ? (P.sep.countdown_s > 0 ? `; shelter reached ${fmt(P.sep.countdown_s / 60, 0)} min before onset.` : `; onset comes ${fmt(-P.sep.countdown_s / 60, 0)} min BEFORE arrival.`) : "."));
+    else if (/RECOMMEND WAIT OR RETURN/.test(r.info.response)) { tlog("warn", `No safe route to the goal in these conditions: position fixes are unavailable, so the position error cannot be kept inside the hazard buffers. RECOMMENDATION: WAIT OR RETURN. Fastest route to shelter: ${fmt(P.distance_km, 1)} km, ${fmt(P.eta_min, 0)} min.`); S.goal = null; }
+    else tlog(P.verdict.startsWith("NO-GO") ? "warn" : "sys", `Replanned (${r.info.response}, ${r.info.latency_s} s). Remaining: ${fmt(P.eta_min, 0)} min (was ${fmt(oldRem, 0)}), ${P.fix_stops.length} fix stop(s), confidence at goal ${P.confidence_at_goal}. ${P.verdict}.`);
+    P.alerts.forEach(a => tlog("warn", a.msg)); P.violations.forEach(v => tlog("warn", v));
+  });
+}
+function evDust() {
+  $("dustOn").checked = true; $("dustTau").value = 4; $("dustPeak").value = Math.round((S.tElapsed || 0) / 60 + 10); updateTexts();
+  return replanEvent("dust", "Dust opacity is rising (\u03c4 up to 4): star fixes become unavailable and camera matching degrades.");
+}
+function evSep() { const onset = Math.round((S.tElapsed || 0) / 60) + 60; return replanEvent("sep_alert", "SOLAR PARTICLE EVENT ALERT: onset forecast in 60 min. Switching to the fastest route to shelter.", onset); }
+function evHazard() { T.awaitHazard = true; S.place = "hazard"; setSeg("placeSeg", "p", "hazard"); toast("Click the map where the new hazard is.", "info", 4000); tlog("sys", "Click the map where the hazard is."); }
+async function hazardPlaced() {
+  if (!S.plan || !S.goal) { tlog("sys", "Hazard marked. Plan a route to see its effect."); return; }
+  S.place = "start"; setSeg("placeSeg", "p", "start");
+  tlog("sys", "New hazard reported by the sensors. Replanning around it (D* Lite).");
+  await replanHazards();
+  if (S.plan) tlog("sys", `Replanned: ${routeLine(S.plan)}`);
+}
+// ---- the conversation
+async function send(text) {
+  text = (text || "").trim(); if (!text || S.busy) return; $("cmd").value = ""; tlog("crew", text);
+  let r;
+  try { r = await api("/ai/interpret", {text, context: {query: T.query, n_sites: T.sites.length, chosen: T.chosen, has_route: !!S.plan}}); }
+  catch (e) { tlog("warn", "AI layer error: " + e.message); return; }
+  (r.warnings || []).forEach(w => tlog("warn", w)); (r.notes || []).forEach(n => tlog("sys", n));
+  tlog("ai", r.reply + (r.resolver && r.resolver !== "offline" ? `  [${r.resolver}]` : ""));
+  switch (r.intent) {
+    case "new_request": case "refine": T.query = r.query; renderQuery(); setStep(1); await findSites(); break;
+    case "select": chooseSite((r.select || 0) - 1); if (r.confirm && T.chosen != null) await confirmRoute(); break;
+    case "confirm": await confirmRoute(); break;
+    case "explain": showExplain(); break;
+    case "cancel": T.query = null; T.sites = []; T.unreachable = []; T.chosen = null; S.plan = null; S.goal = null; resetCrew(); $("qcard").innerHTML = ""; $("sitecards").innerHTML = ""; $("confirmBar").innerHTML = ""; renderResults(); setStep(0); draw(); break;
+    case "simulate": if (r.simulate === "dust") await evDust(); else if (r.simulate === "sep") await evSep(); else evHazard(); break;
+  }
+}
+async function initTerminal() {
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  $("sendBtn").onclick = () => send($("cmd").value); $("cmd").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); send($("cmd").value); } e.stopPropagation(); });
+  $("evAdvance").onclick = evAdvance; $("evDust").onclick = evDust; $("evSep").onclick = evSep; $("evHaz").onclick = evHazard;
+  const ex = ["Sample carbonates near the delta, two hours max.", "Collect olivine from the crater floor, 90 minutes.", "Survey the rim by rover, three hours.", "Take me back to the lander.", "help"];
+  $("examples").innerHTML = ex.map(e => `<button>${esc(e)}</button>`).join(""); $("examples").onclick = e => { const b = e.target.closest("button"); if (b) send(b.textContent); };
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) { const mb = $("micBtn"); mb.style.display = "inline-block"; mb.onclick = () => { try { const rec = new SR(); rec.lang = "en-US"; rec.onresult = ev => send(ev.results[0][0].transcript); rec.onerror = () => tlog("sys", "Speech recognition failed; type instead."); rec.start(); tlog("sys", "Listening\u2026 (browser speech recognition; in Chrome this uses an online service, so it is not offline)"); } catch (e) { tlog("sys", "Speech recognition is unavailable here; type instead."); } }; }
+  try {
+    const st = await api("/ai/status");
+    $("aiPill").textContent = "AI LAYER: " + (st.offline ? "offline parser (no model, no network)" : st.resolver + " model");
+    $("catNote").textContent = `Science sites: ${st.catalogue.n_sites} (${st.catalogue.source}). ` + (st.catalogue.illustrative ? "Mineral tags are ILLUSTRATIVE, not the real CRISM / geologic-map layers." : "");
+  } catch (e) { $("aiPill").textContent = "AI LAYER: unavailable"; }
+  setStep(0); setTab("term");
+  tlog("sys", "Lander terminal ready. All processing is on board; there is no Earth link.");
+  tlog("sys", "Say what you want to do, for example: \u201cSample carbonates near the delta, two hours max.\u201d");
+}
+
+boot();
+</script>
+</body>
+</html>

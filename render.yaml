@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: mars-nav-prototype
+    runtime: docker
+    plan: free
+    rootDir: mars_hud_work
+    healthCheckPath: /api/health

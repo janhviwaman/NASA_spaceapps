@@ -1,0 +1,16 @@
+{
+  "name": "Jezero Delta Front Traverse",
+  "waypoints": [
+    { "x": 0,   "y": 0,   "name": "Hab airlock" },
+    { "x": 8,   "y": 40,  "name": "Rover pad" },
+    { "x": -18, "y": 95,  "name": "Ridge turn" },
+    { "x": -60, "y": 140, "name": "Boulder gap" },
+    { "x": -70, "y": 210, "name": "Dune crest" },
+    { "x": -30, "y": 270, "name": "Sample site A" },
+    { "x": 30,  "y": 300, "name": "Delta front" }
+  ],
+  "hazards": [
+    { "x": -40, "y": 118, "name": "Loose regolith", "r": 7 },
+    { "x": -52, "y": 180, "name": "Rock field", "r": 9 }
+  ]
+}

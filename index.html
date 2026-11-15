@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Mars EVA HUD</title>
+<meta name="theme-color" content="#1a0c08">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+:root{--line:#3df2c8;--warn:#ff5a36;--ink:#ffe9d0;--dim:#b87a5a;--bg:#1a0c08}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);overflow:hidden;font-family:Bahnschrift,"DIN Alternate","Arial Narrow",sans-serif;color:var(--ink);touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+video{display:none}
+#bar{position:fixed;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));display:flex;gap:6px;z-index:5}
+button,input{font:inherit;color:var(--ink);background:rgba(26,12,8,.8);border:1px solid var(--dim);border-radius:6px;padding:8px 11px}
+button:active{background:var(--line);color:#000}
+button.on{border-color:var(--line);color:var(--line)}
+#panel{position:fixed;inset:auto 0 0 0;max-height:80%;overflow:auto;background:rgba(26,12,8,.95);border-top:2px solid var(--line);padding:16px;z-index:6;display:none;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+#panel.open{display:block}
+#panel h2{font-size:16px;margin:12px 0 6px;color:var(--line)}
+#panel .row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+#panel input{flex:1;min-width:140px}
+#log{font-size:13px;color:var(--dim);white-space:pre-wrap;max-height:90px;overflow:auto}
+</style></head><body>
+<canvas id="c"></canvas><video id="v" playsinline muted></video>
+<div id="bar"><button id="bMenu">Menu</button></div>
+<div id="panel">
+  <h2>Base link</h2>
+  <div class="row"><input id="host" placeholder="192.168.1.10:8443" inputmode="url"><button id="bConn">Connect</button></div>
+  <div class="row"><button id="bFile">Load mission file</button><button id="bSync">Re-download mission</button></div>
+  <input type="file" id="file" accept=".json" hidden>
+  <div id="log"></div>
+  <h2>View</h2>
+  <div class="row">
+    <button id="bSens">Enable motion</button><button id="bCenter">Face path</button>
+    <button id="bCam">Camera</button><button id="bVR">Goggle mode</button>
+    <button id="bSim">Sim walk</button><button id="bTop">Open standalone</button><button id="bStep">Step +5 m</button><button id="bReset">Restart</button><button id="bFull">Fullscreen</button>
+  </div>
+  <div class="row"><button id="bClose">Close</button></div>
+</div>
+<script>
+/* ---------- PROTOCOL (server → goggles, JSON over WebSocket at /ws, or GET /mission.json) ----------
+ {type:"mission", name, waypoints:[{x,y,name}], hazards:[{x,y,name,r}]}   x=east m, y=north m, base = 0,0
+ {type:"position", x, y}                         live position fix (overrides sim)
+ {type:"telemetry", o2, battery, co2}            percent values
+ {type:"msg", text}                              toast shown in view
+ {type:"command", action:"recenter"|"goto", index}
+----------------------------------------------------------------------------------------------- */
+const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
+const EYE=1.7,NEAR=.3,LW=1.1,T0=Date.now();
+let W,H,dpr=1;
+const S={mission:null,path:[],pos:{x:0,y:0},ptr:0,tele:{o2:'--',battery:'--',co2:'--'},toast:'',toastT:0,
+ ang:{a:0,b:90,g:0},yaw:0,drag:{yaw:0,pitch:0},sens:false,vr:false,cam:false,sim:false,link:'offline',dist:0};
+
+const DEMO={name:'Jezero Delta Front Traverse',waypoints:[
+ {x:0,y:0,name:'Hab airlock'},{x:8,y:40,name:'Rover pad'},{x:-18,y:95,name:'Ridge turn'},{x:-60,y:140,name:'Boulder gap'},
+ {x:-70,y:210,name:'Dune crest'},{x:-30,y:270,name:'Sample site A'},{x:30,y:300,name:'Delta front'}],
+ hazards:[{x:-40,y:118,name:'Loose regolith',r:7},{x:-52,y:180,name:'Rock field',r:9}]};
+
+/* ---------- mission handling ---------- */
+function setMission(m,save=true){
+  S.mission=m;S.tgt=null;S.ptr=1;S.pos={x:m.waypoints[0].x,y:m.waypoints[0].y};
+  const P=m.waypoints.map(w=>[w.x,w.y]),out=[];
+  for(let i=0;i<P.length-1;i++){const p0=P[Math.max(i-1,0)],p1=P[i],p2=P[i+1],p3=P[Math.min(i+2,P.length-1)];
+    const n=Math.max(2,Math.round(Math.hypot(p2[0]-p1[0],p2[1]-p1[1])/1.5));
+    for(let k=0;k<n;k++){const t=k/n,t2=t*t,t3=t2*t,f=(a,b,c,d)=>.5*(2*b+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+      out.push({x:f(p0[0],p1[0],p2[0],p3[0]),y:f(p0[1],p1[1],p2[1],p3[1])});}}
+  out.push({x:P[P.length-1][0],y:P[P.length-1][1]});
+  let d=0;out.forEach((p,i)=>{if(i)d+=Math.hypot(p.x-out[i-1].x,p.y-out[i-1].y);p.d=d});
+  S.path=out;S.total=d;
+  if(save)try{localStorage.setItem('mission',JSON.stringify(m))}catch(e){}
+  log('Mission loaded: '+m.name+' ('+Math.round(d)+' m)');toast('Mission loaded: '+m.name);
+}
+function log(t){$('log').textContent=t+'\n'+$('log').textContent}
+function toast(t){S.toast=t;S.toastT=Date.now()}
+
+/* ---------- comms ---------- */
+let ws;
+function base(){const h=$('host').value.trim();return h?{http:(location.protocol==='https:'?'https://':'http://')+h,ws:(location.protocol==='https:'?'wss://':'ws://')+h+'/ws'}:null}
+function connect(){
+  const b=base();if(!b)return log('Enter the base server address first.');
+  try{localStorage.setItem('host',$('host').value)}catch(e){}
+  if(ws)ws.close();S.link='connecting';
+  try{ws=new WebSocket(b.ws)}catch(e){S.link='offline';return log('Link error: '+e.message)}
+  ws.onopen=()=>{S.link='online';log('Linked to '+$('host').value)};
+  ws.onclose=()=>{S.link='offline';log('Link closed')};
+  ws.onerror=()=>log('Link failed. Check Wi-Fi, address, and that the page and server both use https or both http.');
+  ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(x){log('Bad message')}};
+  sync();
+}
+async function sync(){
+  const b=base();if(!b)return;
+  try{const r=await fetch(b.http+'/mission.json');handle({type:'mission',...await r.json()})}catch(e){log('Mission download failed: '+e.message)}
+}
+function handle(m){
+  if(m.type==='mission'&&m.waypoints&&m.waypoints.length>1)setMission(m);
+  else if(m.type==='position'){S.tgt=null;S.sim=false;$('bSim').classList.remove('on');S.pos={x:m.x,y:m.y}}
+  else if(m.type==='telemetry')Object.assign(S.tele,m);
+  else if(m.type==='msg')toast(m.text);
+  else if(m.type==='command'){if(m.action==='recenter')recenter();if(m.action==='goto')S.ptr=Math.max(1,Math.min(m.index,S.mission.waypoints.length-1))}
+}
+
+/* ---------- orientation ---------- */
+function mul(a,b){const r=[];for(let i=0;i<3;i++){r[i]=[];for(let j=0;j<3;j++)r[i][j]=a[i][0]*b[0][j]+a[i][1]*b[1][j]+a[i][2]*b[2][j]}return r}
+const ap=(R,v)=>[R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],R[1][0]*v[0]+R[1][1]*v[1]+R[1][2]*v[2],R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],rad=Math.PI/180;
+function basis(){
+  const th=(screen.orientation?screen.orientation.angle:(window.orientation||0))*rad;
+  let a,b,gm;
+  if(S.sens){a=(S.ang.a+S.yaw)*rad;b=S.ang.b*rad;gm=S.ang.g*rad}
+  else{a=-S.drag.yaw*rad;b=(90+S.drag.pitch)*rad;gm=0}
+  const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b),cg=Math.cos(gm),sg=Math.sin(gm);
+  const R=mul(mul([[ca,-sa,0],[sa,ca,0],[0,0,1]],[[1,0,0],[0,cb,-sb],[0,sb,cb]]),[[cg,0,sg],[0,1,0],[-sg,0,cg]]);
+  return{f:ap(R,[0,0,-1]),r:ap(R,[Math.cos(th),-Math.sin(th),0]),u:ap(R,[Math.sin(th),Math.cos(th),0])};
+}
+const hdgOf=f=>(Math.atan2(f[0],f[1])/rad+360)%360;
+function bearingTo(p){return(Math.atan2(p.x-S.pos.x,p.y-S.pos.y)/rad+360)%360}
+function recenter(){
+  const B=basis(),tgt=S.mission?bearingTo(S.mission.waypoints[S.ptr]):0;
+  S.yaw+=hdgOf(B.f)-tgt;S.drag.yaw=0;
+}
+
+/* ---------- rendering ---------- */
+let CB,eyeShift=0,VW,VH,VX,FOC;
+function toCam(wx,wy,wz){
+  const p=[wx-S.pos.x-CB.r[0]*eyeShift,wy-S.pos.y-CB.r[1]*eyeShift,wz-EYE-CB.r[2]*eyeShift];
+  return[dot(p,CB.r),dot(p,CB.u),dot(p,CB.f)];
+}
+const prj=c=>[VX+VW/2+FOC*c[0]/c[2],VH/2-FOC*c[1]/c[2]];
+function clip(poly){ // clip to near plane
+  const o=[];for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],ia=a[2]>=NEAR,ib=b[2]>=NEAR;
+    if(ia)o.push(a);if(ia!==ib){const t=(NEAR-a[2])/(b[2]-a[2]);o.push([a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1]),NEAR])}}return o;
+}
+function fill(poly,style){
+  const c=clip(poly);if(c.length<3)return;g.beginPath();c.forEach((p,i)=>{const q=prj(p);i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1])});g.closePath();g.fillStyle=style;g.fill();
+}
+function seg(a,b,col,w){
+  const c=clip([a,b]);if(c.length<2)return;const p=prj(c[0]),q=prj(c[1]);g.strokeStyle=col;g.lineWidth=w;g.beginPath();g.moveTo(p[0],p[1]);g.lineTo(q[0],q[1]);g.stroke();
+}
+function label(txt,wx,wy,wz,col,size){
+  const c=toCam(wx,wy,wz);if(c[2]<NEAR)return;const p=prj(c);
+  if(p[0]<VX||p[0]>VX+VW||p[1]<0||p[1]>VH)return;
+  const d=Math.hypot(wx-S.pos.x,wy-S.pos.y);g.font=size+'px Bahnschrift,"Arial Narrow",sans-serif';g.textAlign='center';
+  g.fillStyle=col;g.fillText(txt,p[0],p[1]-6);g.fillStyle=S_dim;g.fillText(Math.round(d)+' m',p[0],p[1]+size);
+}
+const S_dim='#b87a5a';
+
+function drawWorld(){
+  const hz=CB.f[2]; // sky/ground split drawn via grid; sky tint
+  // ground grid
+  const gx=Math.round(S.pos.x/10)*10,gy=Math.round(S.pos.y/10)*10;
+  for(let i=-8;i<=8;i++){
+    const a=gx+i*10,b=gy+i*10;
+    const f=1-Math.abs(i)/9;
+    seg(toCam(a,gy-80,0),toCam(a,gy+80,0),`rgba(184,122,90,${.12+.15*f})`,1);
+    seg(toCam(gx-80,b,0),toCam(gx+80,b,0),`rgba(184,122,90,${.12+.15*f})`,1);
+  }
+  // race line
+  const P=S.path;if(!P.length)return;
+  let i0=0,best=1e9;P.forEach((p,i)=>{const d=Math.hypot(p.x-S.pos.x,p.y-S.pos.y);if(d<best){best=d;i0=i}});
+  S.dist=P[i0].d;
+  const lastEnd=Math.min(P.length-1,i0+90);
+  const edge=(i,s)=>{const a=P[Math.max(i-1,0)],b=P[Math.min(i+1,P.length-1)],dx=b.x-a.x,dy=b.y-a.y,l=Math.hypot(dx,dy)||1;
+    return toCam(P[i].x+dy/l*LW*s,P[i].y-dx/l*LW*s,0)};
+  for(let i=Math.max(0,i0-6);i<lastEnd;i++){
+    const d=Math.hypot(P[i].x-S.pos.x,P[i].y-S.pos.y),fade=Math.max(0,1-d/130);
+    const stripe=(Math.floor(P[i].d/2.5)%2)===0,ps=i<i0?.25:1;
+    const col=stripe?`rgba(61,242,200,${.75*fade*ps})`:`rgba(255,233,208,${.35*fade*ps})`;
+    fill([edge(i,1),edge(i+1,1),edge(i+1,-1),edge(i,-1)],col);
+    if(stripe&&i>=i0){const m=toCam(P[i].x,P[i].y,.02),n=toCam(P[i+1].x,P[i+1].y,.02);seg(m,n,`rgba(0,40,30,${.7*fade})`,2)}
+  }
+  // hazards
+  (S.mission.hazards||[]).forEach(h=>{
+    const pts=[];for(let k=0;k<24;k++){const t=k/24*6.283;pts.push(toCam(h.x+Math.cos(t)*h.r,h.y+Math.sin(t)*h.r,0))}
+    fill(pts,'rgba(255,90,54,.28)');
+    for(let k=0;k<24;k++)seg(pts[k],pts[(k+1)%24],'rgba(255,90,54,.9)',2);
+    label('! '+h.name,h.x,h.y,2.2,'#ff5a36',15);
+  });
+  // waypoint gates
+  S.mission.waypoints.forEach((w,i)=>{
+    if(i===0)return;const nxt=i===S.ptr;const col=nxt?'#3df2c8':'rgba(255,233,208,.6)';
+    seg(toCam(w.x,w.y,0),toCam(w.x,w.y,5),col,nxt?4:2);
+    seg(toCam(w.x,w.y,5),toCam(w.x+2,w.y,4.2),col,nxt?4:2);
+    label(w.name,w.x,w.y,5.6,col,nxt?20:15);
+  });
+}
+
+function drawHUD(){
+  const cx=VX+VW/2,cy=VH/2,u=Math.min(VW,VH)/100,hd=hdgOf(CB.f);
+  const pitch=Math.asin(Math.max(-1,Math.min(1,CB.f[2])))/rad;
+  const roll=Math.atan2(CB.r[2],CB.u[2])/rad;
+  g.save();g.lineWidth=2;g.textBaseline='alphabetic';
+  // compass tape
+  const ty=VH*.07,pxd=VW/90;
+  g.font=`${3.4*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.textAlign='center';
+  g.save();g.beginPath();g.rect(VX+VW*.2,ty-6*u,VW*.6,9*u);g.clip();
+  for(let d=Math.floor(hd-45);d<=hd+45;d++){
+    if(d%5)continue;const x=cx+(d-hd)*pxd,dd=((d%360)+360)%360,mj=dd%15===0;
+    g.strokeStyle='#ffe9d0';g.beginPath();g.moveTo(x,ty);g.lineTo(x,ty-(mj?2.4:1.2)*u);g.stroke();
+    if(mj){g.fillStyle='#ffe9d0';g.fillText({0:'N',90:'E',180:'S',270:'W'}[dd]||dd,x,ty-3.4*u)}}
+  // bearing to target marker
+  const tb=S.mission?bearingTo(S.mission.waypoints[S.ptr]):hd;let dh=((tb-hd+540)%360)-180;
+  const tx=cx+Math.max(-45,Math.min(45,dh))*pxd;
+  g.fillStyle='#3df2c8';g.beginPath();g.moveTo(tx,ty+1.2*u);g.lineTo(tx-1.5*u,ty+3.6*u);g.lineTo(tx+1.5*u,ty+3.6*u);g.fill();
+  g.restore();
+  g.fillStyle='#ffe9d0';g.font=`bold ${4.2*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.fillText(String(Math.round(hd)).padStart(3,'0')+'°',cx,ty+7.5*u);
+  // horizon / pitch ladder
+  g.save();g.translate(cx,cy);g.rotate(-roll*rad);
+  g.font=`${2.8*u}px Bahnschrift,"Arial Narrow",sans-serif`;
+  for(let p=-30;p<=30;p+=10){const y=(p-pitch)*(FOC*rad);if(Math.abs(y)>VH*.35)continue;
+    const w=p===0?18*u:7*u;g.strokeStyle=p===0?'#ffe9d0':'rgba(255,233,208,.5)';
+    g.beginPath();g.moveTo(-w,-y);g.lineTo(-w*.35,-y);g.moveTo(w*.35,-y);g.lineTo(w,-y);g.stroke();
+    if(p){g.fillStyle='rgba(255,233,208,.6)';g.fillText(p,w+2.5*u,-y+u)}}
+  g.restore();
+  // reticle
+  g.strokeStyle='#3df2c8';g.beginPath();g.arc(cx,cy,1.2*u,0,6.3);g.moveTo(cx-4*u,cy);g.lineTo(cx-2*u,cy);g.moveTo(cx+2*u,cy);g.lineTo(cx+4*u,cy);g.stroke();
+  // off-screen target arrow
+  if(Math.abs(dh)>22){const s=dh>0?1:-1;g.fillStyle='#3df2c8';g.beginPath();g.moveTo(cx+s*30*u,cy);g.lineTo(cx+s*24*u,cy-4*u);g.lineTo(cx+s*24*u,cy+4*u);g.fill();
+    g.font=`bold ${3.6*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.fillText('TURN '+Math.abs(Math.round(dh))+'°',cx+s*30*u,cy+9*u)}
+  // bottom block
+  const m=S.mission,wp=m&&m.waypoints[S.ptr],dist=wp?Math.hypot(wp.x-S.pos.x,wp.y-S.pos.y):0;
+  const by=VH-7*u;g.textAlign='left';
+  g.fillStyle='#ffe9d0';g.font=`bold ${5.4*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.fillText(wp?wp.name:'No mission',VX+VW*.08,by-8*u);
+  g.font=`${3.8*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.fillStyle='#3df2c8';
+  g.fillText(`${Math.round(dist)} m to next`,VX+VW*.08,by-2.5*u);
+  g.fillStyle='#b87a5a';g.fillText(`${Math.round(S.dist)} / ${Math.round(S.total||0)} m`,VX+VW*.08,by+3*u);
+  const bw=VW*.84;g.fillStyle='rgba(255,233,208,.2)';g.fillRect(VX+VW*.08,VH-2.2*u,bw,.8*u);g.fillStyle='#3df2c8';g.fillRect(VX+VW*.08,VH-2.2*u,bw*(S.total?S.dist/S.total:0),.8*u);
+  // right: telemetry
+  g.textAlign='right';g.font=`${3.6*u}px Bahnschrift,"Arial Narrow",sans-serif`;
+  const t=S.tele,rx=VX+VW*.92;let ry=VH*.3;
+  [['O₂',t.o2],['Power',t.battery],['CO₂',t.co2]].forEach(([k,v])=>{g.fillStyle='#b87a5a';g.fillText(k,rx-8*u,ry);g.fillStyle='#ffe9d0';g.fillText(v+(v==='--'?'':'%'),rx,ry);ry+=5*u});
+  // left: link + clock
+  g.textAlign='left';const lc=S.link==='online'?'#3df2c8':S.link==='connecting'?'#ffb020':'#ff5a36';
+  g.fillStyle=lc;g.beginPath();g.arc(VX+VW*.08+u,VH*.3-u,u,0,6.3);g.fill();
+  g.fillStyle='#ffe9d0';g.fillText('Link '+S.link,VX+VW*.08+3*u,VH*.3);
+  const el=Math.floor((Date.now()-T0)/1000);g.fillStyle='#b87a5a';
+  g.fillText('EVA '+String(Math.floor(el/60)).padStart(2,'0')+':'+String(el%60).padStart(2,'0'),VX+VW*.08,VH*.3+5*u);
+  g.fillStyle='#b87a5a';g.fillText(S.sens?'IMU '+Math.round(S.ang.a)+' '+Math.round(S.ang.b)+' '+Math.round(S.ang.g)+'  steps '+(S.steps||0):'IMU off',VX+VW*.08,VH*.3+10*u);
+  g.fillText('motion '+(S.mev||0)+'  acc '+(S.dv||0).toFixed(1),VX+VW*.08,VH*.3+15*u);
+  // toast
+  if(S.toast&&Date.now()-S.toastT<6000){g.textAlign='center';g.fillStyle='rgba(26,12,8,.8)';const tw=g.measureText(S.toast).width+6*u;
+    g.fillRect(cx-tw/2,VH*.2,tw,7*u);g.fillStyle='#ffe9d0';g.font=`${4*u}px Bahnschrift,"Arial Narrow",sans-serif`;g.fillText(S.toast,cx,VH*.2+5*u)}
+  g.restore();
+}
+
+function view(x,w,shift){
+  VX=x;VW=w;VH=H;eyeShift=shift;FOC=Math.min(w,H*1.2)*1.1;
+  g.save();g.beginPath();g.rect(x,0,w,H);g.clip();
+  if(S.cam&&vid.readyState>1){const vr=vid.videoWidth/vid.videoHeight,sc=Math.max(w/vid.videoWidth,H/vid.videoHeight);
+    g.drawImage(vid,x+(w-vid.videoWidth*sc)/2,(H-vid.videoHeight*sc)/2,vid.videoWidth*sc,vid.videoHeight*sc);g.fillStyle='rgba(26,12,8,.25)';g.fillRect(x,0,w,H)}
+  else{const gr=g.createLinearGradient(0,0,0,H);gr.addColorStop(0,'#2b1410');gr.addColorStop(.5,'#6a3320');gr.addColorStop(1,'#1a0c08');g.fillStyle=gr;g.fillRect(x,0,w,H)}
+  if(S.mission){drawWorld()}
+  drawHUD();g.restore();
+}
+const vid=$('v');
+function frame(){
+  const t=performance.now();
+  if(S.sim&&S.path.length){ // walk along line at 1.4 m/s
+    const n=S.path.findIndex(p=>p.d>S.simD);S.simD=(S.simD||0)+1.4/60;
+    const p=S.path[Math.min(S.path.length-1,Math.max(0,n<0?S.path.length-1:n))];S.pos={x:p.x,y:p.y};
+  }
+  if(S.tgt){const dx=S.tgt.x-S.pos.x,dy=S.tgt.y-S.pos.y,d=Math.hypot(dx,dy),mx=2.2/60;if(d<=mx){S.pos={x:S.tgt.x,y:S.tgt.y};S.tgt=null}else S.pos={x:S.pos.x+dx/d*mx,y:S.pos.y+dy/d*mx}}
+  if(S.mission){const w=S.mission.waypoints[S.ptr];if(w&&Math.hypot(w.x-S.pos.x,w.y-S.pos.y)<6&&S.ptr<S.mission.waypoints.length-1){S.ptr++;toast('Waypoint reached. Next: '+S.mission.waypoints[S.ptr].name)}}
+  CB=basis();g.clearRect(0,0,W,H);
+  if(S.vr){view(0,W/2,-.032);view(W/2,W/2,.032)}else view(0,W,0);
+  requestAnimationFrame(frame);
+}
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;g.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+
+/* ---------- step counter: each step moves 0.7 m along the view heading ---------- */
+let lp=9.8,lastStep=0,above=false;
+function onMotion(e){
+  const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
+  const m=Math.hypot(a.x,a.y,a.z);lp+=(m-lp)*.05;const d=m-lp,now=performance.now();S.mev=(S.mev||0)+1;S.dv=d;
+  if(!above&&d>.45&&now-lastStep>250){above=true;lastStep=now;step(.7)}else if(above&&d<.15)above=false;
+}
+function step(len){
+  if(!S.mission)return;const B=basis(),h=Math.abs(B.f[2])<.8?hdgOf(B.f):hdgOf(B.u);
+  S.sim=false;$('bSim').classList.remove('on');
+  S.tgt=S.tgt||{x:S.pos.x,y:S.pos.y};S.tgt.x+=Math.sin(h*rad)*len;S.tgt.y+=Math.cos(h*rad)*len;S.steps=(S.steps||0)+1;
+}
+/* ---------- controls ---------- */
+const tog=(b,k,on)=>b.classList.toggle('on',on);
+async function enableSens(){
+  try{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){if(await DeviceOrientationEvent.requestPermission()!=='granted')return log('Motion permission denied.')}}catch(e){log('Permission error: '+e.message)}
+  try{if(typeof DeviceMotionEvent!=='undefined'&&DeviceMotionEvent.requestPermission)await DeviceMotionEvent.requestPermission()}catch(e){}
+  let abs=false,n=0;
+  const on=e=>{if(e.alpha==null||e.beta==null)return;if(e.type==='deviceorientationabsolute')abs=true;else if(abs)return;n++;S.ang={a:e.alpha,b:e.beta,g:e.gamma};
+    if(!S.sens){S.sens=true;$('bSens').classList.add('on');recenter();log('Motion sensors active.')}};
+  addEventListener('devicemotion',onMotion);addEventListener('deviceorientation',on);addEventListener('deviceorientationabsolute',on);
+  setTimeout(()=>{if(!S.sens)log('No motion data received. If this page is shown inside another app or frame, the browser blocks the sensors there. Open the link directly in Safari or Chrome, or host the file on your own https site.')},1500);
+}
+$('bSens').onclick=enableSens;
+$('bTop').onclick=()=>{const w=window.open(location.href,'_blank');if(!w)log('Pop-up blocked. Allow pop-ups for this page and try again.')};
+if(window.top!==window)log('This page is inside a frame, so iOS will refuse motion access. Tap Open standalone, then Enable motion in the new tab.');
+$('bCenter').onclick=recenter;
+$('bStep').onclick=()=>{for(let i=0;i<7;i++)step(.7)};
+$('bReset').onclick=()=>{if(S.mission){setMission(S.mission,false);S.steps=0;S.simD=0}};
+$('bMenu').onclick=()=>$('panel').classList.add('open');$('bClose').onclick=()=>$('panel').classList.remove('open');
+$('bConn').onclick=connect;$('bSync').onclick=sync;
+$('bFile').onclick=()=>$('file').click();
+$('file').onchange=async e=>{try{setMission(JSON.parse(await e.target.files[0].text()))}catch(x){log('Invalid mission file')}};
+$('bSim').onclick=()=>{S.sim=!S.sim;S.simD=S.sim?0:S.simD;$('bSim').classList.toggle('on',S.sim);if(S.sim&&S.mission)S.ptr=1};
+$('bVR').onclick=()=>{S.vr=!S.vr;$('bVR').classList.toggle('on',S.vr);$('panel').classList.remove('open');$('bar').style.display=S.vr?'none':'flex';
+  if(S.vr){document.documentElement.requestFullscreen?.().catch(()=>{});screen.orientation?.lock?.('landscape').catch(()=>{});toast('Tap screen to open menu')}};
+$('bFull').onclick=()=>document.documentElement.requestFullscreen?.().catch(()=>{});
+$('bCam').onclick=async()=>{
+  if(S.cam){S.cam=false;vid.srcObject?.getTracks().forEach(t=>t.stop());return $('bCam').classList.remove('on')}
+  try{vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});await vid.play();S.cam=true;$('bCam').classList.add('on')}
+  catch(e){log('Camera unavailable: '+e.message)}};
+// drag-to-look fallback (desktop / no sensors) and VR tap = menu
+let dp=null,moved=0;
+cv.addEventListener('pointerdown',e=>{dp=[e.clientX,e.clientY];moved=0});
+cv.addEventListener('pointermove',e=>{if(!dp||S.sens)return;S.drag.yaw+=(e.clientX-dp[0])*.25;S.drag.pitch=Math.max(-80,Math.min(80,S.drag.pitch+(e.clientY-dp[1])*.2));moved+=Math.abs(e.clientX-dp[0]);dp=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{if(S.vr&&moved<5){S.vr=false;$('bVR').classList.remove('on');$('bar').style.display='flex';$('panel').classList.add('open')}dp=null});
+
+/* ---------- boot ---------- */
+try{$('host').value=localStorage.getItem('host')||'';const m=localStorage.getItem('mission');setMission(m?JSON.parse(m):DEMO,false);if(!m)log('Demo mission loaded. Connect to base to download the real one.')}catch(e){setMission(DEMO,false)}
+// when served by the base server on the local network, prefill its address
+if(!$('host').value&&/^[\d.]+$|^localhost$/.test(location.hostname)&&location.port)$('host').value=location.host;
+// offline cache so the app and last mission still work away from base Wi-Fi
+if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+requestAnimationFrame(frame);
+</script></body></html>

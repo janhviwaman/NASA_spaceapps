@@ -1,0 +1,700 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 HelveticaNeue;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab560
+\pard\pardeftab560\slleading20\partightenfactor0
+
+\f0\fs26 \cf0 from __future__ import annotations\
+from fastapi import UploadFile, File\
+from fastapi.responses import FileResponse\
+import asyncio, math, random, uuid\
+from pathlib import Path\
+from typing import Optional\
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException\
+from fastapi.responses import HTMLResponse\
+from fastapi.staticfiles import StaticFiles\
+from pydantic import BaseModel, Field\
+from .engine import SITES, resolve_request, make_plan, make_frame\
+\
+app = FastAPI(title="Mars Surface Navigation Prototype", version="0.1.0")\
+from pydantic import BaseModel\
+from datetime import datetime\
+\
+class Message(BaseModel):\
+    text: str\
+\
+@app.post("/message")\
+async def receive_message(message: Message):\
+    print(\
+        f"\\n[WINDOWS MESSAGE] \{datetime.now().strftime('%H:%M:%S')\}: \{message.text\}",\
+        flush=True\
+    )\
+    return \{"status": "delivered", "message": message.text\}\
+BASE = Path(__file__).resolve().parent\
+app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")\
+\
+sessions = \{\}\
+clients = \{\}\
+\
+class MissionRequest(BaseModel):\
+    request: str = "Sample carbonates near the delta, two hours max."\
+    mode: str = "walk"\
+    time_budget_min: int = Field(default=120, ge=10, le=600)\
+    localization_quality: str = "high"\
+\
+class PlanRequest(BaseModel):\
+    site_id: str\
+    mode: str = "walk"\
+    localization_quality: str = "high"\
+\
+@app.get("/", response_class=HTMLResponse)\
+async def index():\
+    return (BASE / "static" / "index.html").read_text()\
+\
+@app.get("/hud", response_class=HTMLResponse)\
+async def hud():\
+    return (BASE / "static" / "hud.html").read_text()\
+\
+@app.get("/api/health")\
+async def health():\
+    return \{"status": "ok", "prototype": True, "data_source": "synthetic"\}\
+\
+@app.get("/api/sites")\
+async def sites():\
+    return \{"sites": SITES, "data_source": "synthetic"\}\
+\
+@app.post("/api/resolve")\
+async def resolve(req: MissionRequest):\
+    return resolve_request(req.request, req.mode, req.time_budget_min)\
+\
+@app.post("/api/plan")\
+async def plan(req: PlanRequest):\
+    site = next((s for s in SITES if s["id"] == req.site_id), None)\
+    if not site:\
+        raise HTTPException(404, "Unknown site")\
+    return make_plan(site, req.mode, req.localization_quality)\
+\
+@app.post("/api/session")\
+async def create_session():\
+    code = uuid.uuid4().hex[:6].upper()\
+    sid = str(uuid.uuid4())\
+    sessions[code] = \{"id": sid, "code": code, "status": "planned", "t": 0.0,\
+                      "tau": 0.2, "sep": False, "quality": "high",\
+                      "plan": None, "mode": "walk", "running": False\}\
+    return \{"session_id": sid, "join_code": code, "hud_url": f"/hud?code=\{code\}"\}\
+\
+@app.post("/api/session/\{code\}/configure")\
+async def configure(code: str, payload: dict):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    plan = payload.get("plan")\
+    if plan is not None and not isinstance(plan, dict):\
+        raise HTTPException(400, "plan must be a JSON object")\
+    if plan is not None and not isinstance(plan.get("waypoints_enu_m", []), list):\
+        raise HTTPException(400, "waypoints_enu_m must be an array")\
+    s["plan"] = plan\
+    s["quality"] = payload.get("quality", "high")\
+    s["mode"] = payload.get("mode", "walk")\
+    return \{"ok": True\}\
+\
+@app.get("/api/session/\{code\}/mission")\
+async def get_mission(code: str):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    return \{"mission": s.get("plan"), "session_code": code.upper(), "status": "loaded" if s.get("plan") else "awaiting_mission"\}\
+\
+@app.post("/api/session/\{code\}/mission")\
+async def upload_mission(code: str, payload: dict):\
+    """Accept a mission plan uploaded by the mission-design console/server."""\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    plan = payload.get("mission", payload.get("plan", payload))\
+    if not isinstance(plan, dict) or not isinstance(plan.get("waypoints_enu_m"), list) or len(plan["waypoints_enu_m"]) < 2:\
+        raise HTTPException(400, "Mission requires a waypoints_enu_m array with at least two points")\
+    for point in plan["waypoints_enu_m"]:\
+        if not isinstance(point, (list, tuple)) or len(point) < 2:\
+            raise HTTPException(400, "Each waypoint must contain [east_m, north_m]")\
+        try:\
+            float(point[0]); float(point[1])\
+        except (TypeError, ValueError):\
+            raise HTTPException(400, "Waypoint coordinates must be numeric")\
+    s["plan"] = plan\
+    s["mode"] = plan.get("mode", s.get("mode", "walk"))\
+    s["quality"] = plan.get("localization_quality", s.get("quality", "high"))\
+    return \{"ok": True, "mission_id": plan.get("plan_id"), "waypoint_count": len(plan["waypoints_enu_m"])\}\
+\
+@app.post("/api/session/\{code\}/start")\
+async def start(code: str):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    s["running"] = True\
+    return \{"ok": True\}\
+\
+@app.post("/api/session/\{code\}/pause")\
+async def pause(code: str):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    s["running"] = False\
+    return \{"ok": True\}\
+\
+@app.post("/api/session/\{code\}/event")\
+async def event(code: str, payload: dict):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    kind = payload.get("kind")\
+    if kind == "dust":\
+        s["tau"] = 2.5\
+    elif kind == "sep":\
+        s["sep"] = True\
+    elif kind == "clear":\
+        s["tau"] = 0.2\
+        s["sep"] = False\
+    else:\
+        raise HTTPException(400, "Event must be dust, sep, or clear")\
+    return \{"ok": True, "event": kind\}\
+\
+@app.get("/api/session/\{code\}/state")\
+async def state(code: str):\
+    s = sessions.get(code.upper())\
+    if not s: raise HTTPException(404, "Session not found")\
+    return make_frame(s)\
+\
+@app.websocket("/ws/\{code\}")\
+async def websocket_endpoint(ws: WebSocket, code: str):\
+    code = code.upper()\
+    if code not in sessions:\
+        await ws.close(code=1008)\
+        return\
+    await ws.accept()\
+    clients.setdefault(code, set()).add(ws)\
+    try:\
+        while True:\
+            s = sessions[code]\
+            if s["running"]:\
+                s["t"] += 1.0\
+                if 20 <= s["t"] < 40 and s["tau"] < 1.0:\
+                    s["tau"] = 0.2 + (s["t"] - 20) / 20 * 2.3\
+                elif s["t"] >= 40 and s["tau"] > 0.2 and s["tau"] < 2.5:\
+                    s["tau"] = 2.5\
+                frame = make_frame(s)\
+                await ws.send_json(frame)\
+            else:\
+                await ws.send_json(make_frame(s))\
+            await asyncio.sleep(1)\
+    except WebSocketDisconnect:\
+        clients.get(code, set()).discard(ws)\
+\
+\
+# ===== LAPTOP LINK: TWO-WAY CHAT =====\
+\
+import json\
+from datetime import datetime\
+from fastapi import WebSocket, WebSocketDisconnect\
+from fastapi.responses import HTMLResponse\
+\
+connected_clients = set()\
+\
+\
+@app.get("/chat", response_class=HTMLResponse)\
+async def chat_page():\
+    return """\
+<!DOCTYPE html>\
+<html>\
+<head>\
+<title>Laptop Link</title>\
+<meta name="viewport" content="width=device-width, initial-scale=1">   border-radius: 12px;\
+    background: #111827;\
+    color: white;\
+\}\
+<style>\
+body \{\
+    font-family: Arial, sans-serif;\
+    background: #111827;\
+    color: white;\
+    max-width: 750px;\
+    margin: 40px auto;\
+    padding: 20px;\
+\}\
+h1 \{ color: #60a5fa; \}\
+#status \{ color: #4ade80; margin-bottom: 15px; \}\
+#messages \{\
+    height: 400px;\
+    overflow-y: auto;\
+    background: #1f2937;\
+    padding: 15px;\
+    border-radius: 12px;\
+\}\
+.message \{\
+    background: #374151;\
+    padding: 12px;\
+    margin: 10px 0;\
+    border-radius: 10px;\
+    overflow-wrap: anywhere;\
+\}\
+.time \{ color: #9ca3af; font-size: 11px; \}\
+input \{\
+    padding: 13px;\
+    border-radius: 8px;\
+    border: none;\
+    box-sizing: border-box;\
+\}\
+#name \{ width: 100%; margin: 12px 0; \}\
+#message \{ width: 78%; \}\
+button \{\
+    padding: 13px;\
+    background: #2563eb;\
+    color: white;\
+    border: none;\
+    border-radius: 8px;\
+    cursor: pointer;\
+\}\
+#file-panel \{\
+    margin-top: 30px;\
+    padding: 20px;\
+    border: 1px solid #334155;\
+    border-radius: 12px;\
+    background: #111827;\
+    color: white;\
+\}\
+\
+#drop-area \{\
+    border: 2px dashed #64748b;\
+    border-radius: 10px;\
+    padding: 25px;\
+    text-align: center;\
+    margin: 15px 0;\
+\}\
+\
+#drop-area.dragover \{\
+    border-color: #2563eb;\
+    background: #1e293b;\
+\}\
+\
+.file-heading \{\
+    display: flex;\
+    align-items: center;\
+    justify-content: space-between;\
+\}\
+\
+.file-item \{\
+    display: flex;\
+    justify-content: space-between;\
+    align-items: center;\
+    gap: 12px;\
+    padding: 12px;\
+    margin: 8px 0;\
+    background: #1e293b;\
+    border-radius: 8px;\
+    overflow-wrap: anywhere;\
+\}\
+\
+.file-info \{\
+    flex: 1;\
+\}\
+\
+.file-size \{\
+    color: #94a3b8;\
+    font-size: 12px;\
+\}\
+\
+#uploadStatus \{\
+    margin: 12px 0;\
+    color: #93c5fd;\
+\}\
+\
+.progress-track \{\
+    height: 8px;\
+    background: #334155;\
+    border-radius: 10px;\
+    overflow: hidden;\
+    margin-top: 8px;\
+\}\
+\
+.progress-bar \{\
+    height: 100%;\
+    width: 0%;\
+    background: #2563eb;\
+\}\
+\
+.file-download \{\
+    color: #93c5fd;\
+    text-decoration: none;\
+    white-space: nowrap;\
+\}\
+\
+</style>\
+</head>\
+<body>\
+\
+<h1>Laptop Link</h1>\
+<p>Direct laptop-to-laptop messaging</p>\
+<div id="status">Connecting...</div>\
+\
+<input id="name" placeholder="Your laptop name" value="Laptop">\
+\
+<div id="messages"></div>\
+\
+<input id="message" placeholder="Type a message...">\
+<button onclick="sendMessage()">Send</button>\
+<div id="file-panel">\
+    <h2>File Sharing</h2>\
+    <p>Share files between your connected laptops.</p>\
+    <div id="drop-area">\
+        <p><strong>Drop files here</strong></p>\
+        <p>or</p>\
+        <input type="file" id="fileInput" multiple>\
+        <button onclick="uploadSelectedFiles()">Upload files</button>\
+<div id="file-panel">\
+    <h2>File Sharing</h2>\
+    <p>Share files between your connected laptops.</p>\
+\
+    <div id="drop-area">\
+        <p><strong>Drop files here</strong></p>\
+        <p>or</p>\
+        <input type="file" id="fileInput" multiple>\
+        <button onclick="uploadSelectedFiles()">Upload files</button>\
+    </div>\
+\
+    <div id="uploadStatus"></div>\
+\
+    <div class="file-heading">\
+        <h3>Shared files</h3>\
+        <button onclick="loadFiles()">Refresh</button>\
+    </div>\
+\
+    <div id="fileList">Loading files...</div>\
+</div>\
+    </div>\
+\
+    <div id="uploadStatus"></div>\
+\
+    <div class="file-heading">\
+        <h3>Shared files</h3>\
+        <button onclick="loadFiles()">Refresh</button>\
+    </div>\
+\
+    <div id="fileList">Loading files...</div>\
+</div>\
+\
+<script>\
+const status = document.getElementById("status");\
+const messages = document.getElementById("messages");\
+const input = document.getElementById("message");\
+const nameInput = document.getElementById("name");\
+\
+const protocol = location.protocol === "https:" ? "wss:" : "ws:";\
+const ws = new WebSocket(\
+    protocol + "//" + location.host + "/laptop-link/ws"\
+);\
+\
+ws.onopen = () => \{\
+    status.textContent = "Connected";\
+\};\
+\
+ws.onclose = () => \{\
+    status.textContent = "Disconnected - refresh to reconnect";\
+\};\
+\
+ws.onerror = () => \{\
+    status.textContent = "Connection error";\
+\};\
+\
+ws.onmessage = (event) => \{\
+    const data = JSON.parse(event.data);\
+\
+    const bubble = document.createElement("div");\
+    bubble.className = "message";\
+\
+    const sender = document.createElement("strong");\
+    sender.textContent = data.sender + ": ";\
+\
+    const text = document.createElement("span");\
+    text.textContent = data.text;\
+\
+    const time = document.createElement("div");\
+    time.className = "time";\
+    time.textContent = data.time;\
+\
+    bubble.append(sender, text, time);\
+    messages.appendChild(bubble);\
+    messages.scrollTop = messages.scrollHeight;\
+\};\
+\
+function sendMessage() \{\
+    const text = input.value.trim();\
+\
+    if (!text || ws.readyState !== WebSocket.OPEN) return;\
+\
+    ws.send(JSON.stringify(\{\
+        sender: nameInput.value || "Laptop",\
+        text: text\
+    \}));\
+\
+    input.value = "";\
+    input.focus();\
+\}\
+\
+input.addEventListener("keydown", (event) => \{\
+    if (event.key === "Enter") sendMessage();\
+\});\
+\
+// ===== FILE SHARING =====\
+\
+const fileInput = document.getElementById("fileInput");\
+const dropArea = document.getElementById("drop-area");\
+const fileList = document.getElementById("fileList");\
+const uploadStatus = document.getElementById("uploadStatus");\
+\
+function formatSize(bytes) \{\
+    if (bytes < 1024) return bytes + " B";\
+    if (bytes < 1024 * 1024)\
+        return (bytes / 1024).toFixed(1) + " KB";\
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";\
+\}\
+\
+function uploadFile(file) \{\
+    const formData = new FormData();\
+    formData.append("file", file);\
+\
+    uploadStatus.textContent = "Uploading " + file.name + "...";\
+\
+    const xhr = new XMLHttpRequest();\
+\
+    xhr.open("POST", "/files/upload");\
+\
+    xhr.upload.onprogress = (event) => \{\
+        if (event.lengthComputable) \{\
+            const percent = Math.round(\
+                event.loaded / event.total * 100\
+            );\
+            uploadStatus.textContent =\
+                "Uploading " + file.name + ": " + percent + "%";\
+        \}\
+    \};\
+\
+    xhr.onload = () => \{\
+        if (xhr.status >= 200 && xhr.status < 300) \{\
+            uploadStatus.textContent = file.name + " uploaded successfully!";\
+            loadFiles();\
+        \} else \{\
+            uploadStatus.textContent =\
+                "Upload failed: " + xhr.responseText;\
+        \}\
+    \};\
+\
+    xhr.onerror = () => \{\
+        uploadStatus.textContent = "Network error during upload.";\
+    \};\
+\
+    xhr.send(formData);\
+\}\
+\
+function uploadSelectedFiles() \{\
+    const files = fileInput.files;\
+\
+    if (!files.length) \{\
+        uploadStatus.textContent = "Please select a file first.";\
+        return;\
+    \}\
+\
+    Array.from(files).forEach(uploadFile);\
+    fileInput.value = "";\
+\}\
+\
+dropArea.addEventListener("dragover", (event) => \{\
+    event.preventDefault();\
+    dropArea.classList.add("dragover");\
+\});\
+\
+dropArea.addEventListener("dragleave", () => \{\
+    dropArea.classList.remove("dragover");\
+\});\
+\
+dropArea.addEventListener("drop", (event) => \{\
+    event.preventDefault();\
+    dropArea.classList.remove("dragover");\
+\
+    Array.from(event.dataTransfer.files).forEach(uploadFile);\
+\});\
+\
+async function loadFiles() \{\
+    fileList.textContent = "Loading files...";\
+\
+    try \{\
+        const response = await fetch("/files");\
+\
+        if (!response.ok) throw new Error("Could not retrieve files");\
+\
+        const data = await response.json();\
+        fileList.replaceChildren();\
+\
+        if (!data.files.length) \{\
+            fileList.textContent = "No shared files yet.";\
+            return;\
+        \}\
+\
+        data.files.forEach(file => \{\
+            const item = document.createElement("div");\
+            item.className = "file-item";\
+\
+            const info = document.createElement("div");\
+            info.className = "file-info";\
+\
+            const name = document.createElement("strong");\
+            name.textContent = file.filename;\
+\
+            const size = document.createElement("div");\
+            size.className = "file-size";\
+            size.textContent = formatSize(file.size_bytes);\
+\
+            info.append(name, size);\
+\
+            const link = document.createElement("a");\
+            link.className = "file-download";\
+            link.textContent = "Download";\
+            link.href = "/files/" + encodeURIComponent(file.filename);\
+            link.download = file.filename;\
+\
+            item.append(info, link);\
+            fileList.appendChild(item);\
+        \});\
+\
+    \} catch (error) \{\
+        fileList.textContent = "Unable to load shared files.";\
+    \}\
+\}\
+\
+loadFiles();\
+\
+// ===== END FILE SHARING =====\
+</script>\
+\
+</body>\
+</html>\
+"""\
+\
+\
+@app.websocket("/laptop-link/ws")\
+async def chat_websocket(websocket: WebSocket):\
+    await websocket.accept()\
+    connected_clients.add(websocket)\
+\
+    try:\
+        while True:\
+            raw = await websocket.receive_text()\
+            data = json.loads(raw)\
+\
+            text = str(data.get("text", ""))[:5000]\
+            sender = str(data.get("sender", "Laptop"))[:40]\
+\
+            if not text.strip():\
+                continue\
+\
+            message = json.dumps(\{\
+                "sender": sender,\
+                "text": text,\
+                "time": datetime.now().strftime("%H:%M:%S")\
+            \})\
+\
+            for client in list(connected_clients):\
+                try:\
+                    await client.send_text(message)\
+                except Exception:\
+                    connected_clients.discard(client)\
+\
+    except WebSocketDisconnect:\
+        connected_clients.discard(websocket)\
+\
+    except Exception:\
+        connected_clients.discard(websocket)\
+\
+# ===== END LAPTOP LINK =====\
+\
+\
+# ===== LAPTOP LINK: FILE TRANSFER =====\
+\
+import uuid\
+\
+UPLOAD_DIR = BASE / "shared_files"\
+UPLOAD_DIR.mkdir(exist_ok=True)\
+\
+@app.post("/files/upload")\
+async def upload_file(file: UploadFile = File(...)):\
+    original_name = Path(file.filename or "upload").name\
+\
+    if not original_name:\
+        raise HTTPException(status_code=400, detail="Invalid filename")\
+\
+    stored_name = f"\{uuid.uuid4().hex\}_\{original_name\}"\
+    destination = UPLOAD_DIR / stored_name\
+    total_size = 0\
+    max_size = 100 * 1024 * 1024  # 100 MB\
+\
+    try:\
+        with destination.open("wb") as output:\
+            while True:\
+                chunk = await file.read(1024 * 1024)\
+                if not chunk:\
+                    break\
+\
+                total_size += len(chunk)\
+\
+                if total_size > max_size:\
+                    raise HTTPException(\
+                        status_code=413,\
+                        detail="File exceeds 100 MB limit"\
+                    )\
+\
+                output.write(chunk)\
+\
+    except Exception:\
+        destination.unlink(missing_ok=True)\
+        raise\
+\
+    finally:\
+        await file.close()\
+\
+    return \{\
+        "status": "uploaded",\
+        "filename": original_name,\
+        "stored_as": stored_name,\
+        "size_bytes": total_size\
+    \}\
+\
+\
+@app.get("/files")\
+async def list_files():\
+    return \{\
+        "files": [\
+            \{\
+                "filename": item.name,\
+                "size_bytes": item.stat().st_size\
+            \}\
+            for item in UPLOAD_DIR.iterdir()\
+            if item.is_file()\
+        ]\
+    \}\
+\
+\
+@app.get("/files/\{filename\}")\
+async def download_file(filename: str):\
+    safe_name = Path(filename).name\
+\
+    if safe_name != filename:\
+        raise HTTPException(status_code=400, detail="Invalid filename")\
+\
+    target = UPLOAD_DIR / safe_name\
+\
+    if not target.is_file():\
+        raise HTTPException(status_code=404, detail="File not found")\
+\
+    return FileResponse(\
+        target,\
+        filename=safe_name\
+    )\
+\
+# ===== END FILE TRANSFER =====\
+\
+}

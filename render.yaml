@@ -1,0 +1,8 @@
+# Render blueprint for the MVP console (deploy from the root of this repository).
+services:
+  - type: web
+    name: mars-nav-mvp
+    runtime: docker
+    plan: free
+    rootDir: components/mvp
+    healthCheckPath: /api/health

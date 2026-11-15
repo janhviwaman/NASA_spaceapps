@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071015">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>MARS NAV | Astronaut HUD</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="hudbody hud-pro">
+  <header class="hudtop">
+    <div class="brand"><span class="dot"></span><div><b>MARS NAV / CREW HUD</b><small>EXPLORATION SYSTEM · FIELD DISPLAY</small></div></div>
+    <div class="hudtopright"><span id="hudConn" class="conn">CONNECTING</span><span id="missionTag">NO MISSION</span><a class="back" href="/">MISSION CONSOLE ↗</a></div>
+  </header>
+  <main class="hudmain hudwide">
+    <form id="joinForm" class="join-panel" hidden>
+      <label for="joinCode">JOIN A MISSION SESSION</label>
+      <div class="join-controls"><input id="joinCode" type="text" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" maxlength="6" placeholder="6-CHARACTER CODE" aria-label="Mission join code"><button type="submit">CONNECT HUD</button></div>
+      <small>Enter the code shown by the mission console. Keep the phone and server on the same network for local testing.</small>
+    </form>
+    <section class="panel imu-panel" aria-label="iPhone motion controls">
+      <div class="panelhead"><span>IPHONE IMU / MOTION LINK</span><span id="imuStatus" class="muted">SENSOR OFF</span></div>
+      <div class="imu-controls">
+        <button id="imuEnable" type="button">ENABLE IPHONE SENSORS</button>
+        <button id="imuCalibrate" type="button" disabled>CALIBRATE / SET FORWARD</button>
+        <button id="imuStop" type="button" disabled>PAUSE SENSORS</button>
+        <label class="imu-mode-label" for="imuMode">DISPLAY MODE</label>
+        <select id="imuMode"><option value="both">BOTH · VISOR + NAV</option><option value="visor">VISOR SIMULATION</option><option value="nav">NAVIGATION CONTROLLER</option></select>
+      </div>
+      <div class="imu-readouts">
+        <div><small>PITCH</small><b id="imuPitch">—°</b></div><div><small>ROLL</small><b id="imuRoll">—°</b></div><div><small>HEADING</small><b id="imuHeading">—°</b></div><div><small>WAYPOINT RELATIVE</small><b id="imuRelative">—°</b></div>
+      </div>
+      <p id="imuHelp" class="imu-help">On iPhone, tap Enable and allow Motion & Orientation access. Sensor access generally requires HTTPS (or localhost); plain HTTP over Wi-Fi will usually be blocked by iOS Safari.</p>
+    </section>
+    <div class="warning"><b>SIMULATION DATA</b> Position, terrain, environmental and consumable values are simulated placeholders. Not certified for real navigation or crew safety.</div>
+
+    <section class="hud-scene panel">
+      <div class="scene-topline"><span id="missionName">AWAITING MISSION DATA</span><span id="missionProgress">WAYPOINT -- / --</span></div>
+      <div class="scene-wrap">
+        <canvas id="scene" width="1400" height="620" aria-label="Simulated Mars terrain view with navigation overlays"></canvas>
+        <div class="scene-vignette"></div>
+        <div class="scene-horizon"><span>SIMULATED TERRAIN VIEW</span><span id="localClock">--:--:-- LMST</span></div>
+        <div class="scene-reticle"><i></i><b></b></div>
+        <div class="scene-speed"><small>GROUND SPEED</small><strong id="hudSpeed">0.0</strong><em>m/s</em></div>
+        <div class="scene-alt"><small>ALT / ELEV.</small><strong id="hudAltitude">—</strong><em>m</em></div>
+        <div class="scene-bearing"><small>HEADING</small><strong id="hudHeading">000°</strong></div>
+        <div class="scene-next"><small>NEXT WAYPOINT</small><strong id="nextWaypoint">WAITING</strong><span id="nextDistance">— m · —°</span></div>
+        <div class="scene-alert" id="sceneAlert"><span class="alert-dot"></span><span id="sceneAlertText">NO ACTIVE ALERTS</span></div>
+      </div>
+      <div class="compassbar">
+        <span class="compass-side">W</span><div class="compass-track" id="compassTrack"><div class="compass-ticks"></div><div class="compass-pointer"></div><div class="compass-labels"><span>NW</span><span>N</span><span>NE</span><span>E</span><span>SE</span><span>S</span><span>SW</span><span>W</span></div></div><span class="compass-side">E</span>
+      </div>
+    </section>
+
+    <section class="hud-grid">
+      <div class="panel route-panel">
+        <div class="panelhead"><span>MISSION ROUTE / WAYPOINTS</span><span id="routeStatus" class="muted">NO ROUTE</span></div>
+        <div class="route-map"><canvas id="routeMap" width="900" height="520"></canvas><div class="map-north">N ↑</div><div class="map-scale">LOCAL ENU · METRES</div></div>
+        <div class="waypoint-list" id="waypointList"><div class="empty-waypoints">Mission route will appear when the server sends a mission plan.</div></div>
+      </div>
+      <div class="panel telemetry-panel">
+        <div class="panelhead"><span>CREW TELEMETRY</span><span id="missionClock" class="muted">T+00:00</span></div>
+        <div class="telemetry-grid">
+          <div class="telemetry-tile"><small>BATTERY / POWER</small><b id="hudPower">—%</b><div class="meter"><i id="powerMeter"></i></div></div>
+          <div class="telemetry-tile"><small>O₂ RESERVE</small><b id="hudO2">—%</b><div class="meter"><i id="o2Meter"></i></div></div>
+          <div class="telemetry-tile"><small>LOCALIZATION</small><b id="hudConfidence">—</b><span id="hudSigma" class="tile-sub">σ — m</span></div>
+          <div class="telemetry-tile"><small>REMAINING ETA</small><b id="hudEta">—</b><span class="tile-sub">TO MISSION GOAL</span></div>
+          <div class="telemetry-tile"><small>DUST OPACITY / τ</small><b id="hudDust">—</b><span id="dustState" class="tile-sub">ATMOSPHERIC</span></div>
+          <div class="telemetry-tile"><small>RADIATION DOSE</small><b id="hudDose">—</b><span class="tile-sub">CUMULATIVE</span></div>
+          <div class="telemetry-tile"><small>RETURN MARGIN</small><b id="hudReturn">—</b><span class="tile-sub">SIMULATED RESERVE</span></div>
+          <div class="telemetry-tile"><small>MISSION DISTANCE</small><b id="hudDistance">—</b><span class="tile-sub">PLANNED TRAVERSE</span></div>
+        </div>
+        <div class="guidance hud-guidance"><span id="guidanceIcon">⌖</span><div><small>NAVIGATION GUIDANCE</small><b id="hudGuidance">WAITING FOR MISSION</b><p id="hudAlert">Join a mission session to receive route guidance.</p></div></div>
+        <div class="hud-actions"><button id="recenterBtn" type="button">RECENTER MAP</button><button id="fullscreenBtn" type="button">IMMERSIVE VIEW</button></div>
+      </div>
+    </section>
+    <footer><span>MARS NAV · CREW DISPLAY</span><span id="dataSource">AWAITING SERVER TELEMETRY</span><span>SESSION <b id="sessionCode">------</b></span></footer>
+  </main>
+  <script src="/static/hud.js"></script>
+</body>
+</html>

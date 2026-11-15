@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jezero EVA Route Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#120d0b; --panel:#1b1411; --panel2:#241a16; --line:#3a2a23; --ink:#f1e6dc; --mute:#a89485;
+  --rust:#d8673a; --safe:#3fcf8e; --bal:#5aa2ff; --fast:#ffb547; --a:#2fd3ff; --b:#ff4fd8; --bad:#ff5d5d;
+}
+*{box-sizing:border-box}
+button,select,input{font-family:inherit}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 370px;height:100vh}
+@media (max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:62vh auto;height:auto}}
+.mapwrap{position:relative;overflow:hidden;background:#000;cursor:crosshair}
+canvas#map{display:block;width:100%;height:100%}
+.hud{position:absolute;left:12px;top:12px;background:rgba(18,13,11,.82);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font:12px "IBM Plex Mono",monospace;color:var(--mute);pointer-events:none;max-width:calc(100% - 24px)}
+.hud b{color:var(--ink);font-weight:500}
+.legend{position:absolute;left:12px;bottom:12px;background:rgba(18,13,11,.85);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;color:var(--mute);display:flex;gap:12px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:5px}
+.toast{position:absolute;right:12px;top:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;display:none}
+aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:18px 18px 28px}
+h1{font:600 17px "IBM Plex Mono",monospace;letter-spacing:.02em;margin:0 0 2px}
+.sub{color:var(--mute);font-size:12.5px;margin-bottom:16px}
+.sec{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+.sec h2{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin:0 0 10px}
+.pt{display:grid;grid-template-columns:22px 1fr;gap:8px;align-items:center;margin-bottom:8px}
+.dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:600 11px "IBM Plex Mono";color:#000}
+select,input[type=number]{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px "IBM Plex Sans"}
+.coord{font:11.5px "IBM Plex Mono",monospace;color:var(--mute);grid-column:2}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px}
+.seg button{background:none;border:0;color:var(--mute);padding:7px 2px;border-radius:6px;font:500 12.5px "IBM Plex Sans";cursor:pointer}
+.seg button.on{background:var(--line);color:var(--ink)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:10px 0 4px;font-size:13px}
+.row span:last-child{font:12.5px "IBM Plex Mono";color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--rust)}
+.go{width:100%;margin-top:14px;background:var(--rust);color:#1a0f0a;border:0;border-radius:8px;padding:11px;font:600 14px "IBM Plex Sans";cursor:pointer}
+.go:disabled{opacity:.5;cursor:wait}
+.card{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:11px 12px;margin-bottom:10px}
+.card .t{display:flex;justify-content:space-between;font:600 13px "IBM Plex Mono";color:var(--c);text-transform:uppercase;letter-spacing:.06em}
+.verdict{font-size:12.5px;margin:6px 0 8px;padding:5px 8px;border-radius:5px}
+.verdict.ok{background:rgba(63,207,142,.12);color:#8be8bd}.verdict.warn{background:rgba(255,181,71,.12);color:#ffd18a}.verdict.no{background:rgba(255,93,93,.13);color:#ffa0a0}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
+.kv div{display:flex;flex-direction:column}
+.kv small{color:var(--mute);font-size:11px}
+.kv b{font:500 14px "IBM Plex Mono"}
+.caut{margin:8px 0 0;padding-left:16px;color:#ffcf99;font-size:12px}
+canvas#profc{width:100%;height:150px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.note{color:var(--mute);font-size:12px}
+.note a{color:#f0a37f}
+label.chk{display:flex;gap:8px;align-items:center;font-size:13px;margin:6px 0;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="mapwrap" id="wrap">
+    <canvas id="map"></canvas>
+    <div class="hud" id="hud">Loading terrain…</div>
+    <div class="toast" id="toast"></div>
+    <div class="legend">
+      <span><i style="background:linear-gradient(90deg,#f7d58a,#e0663a)"></i>slope 10–25°</span>
+      <span><i style="background:#9d0f2c"></i>no-go</span>
+      <span><i style="background:#00e5ff"></i>Perseverance track</span>
+      <span><i style="background:var(--safe)"></i>safest</span><span><i style="background:var(--bal)"></i>balanced</span><span><i style="background:var(--fast)"></i>fastest</span>
+    </div>
+  </div>
+  <aside>
+    <h1>JEZERO EVA ROUTE PLANNER</h1>
+    <div class="sub">Click the map to set <b style="color:var(--a)">A</b>, click again for <b style="color:var(--b)">B</b>. Scroll to zoom, drag to pan.</div>
+
+    <div class="sec"><h2>Points</h2>
+      <div class="pt"><div class="dot" style="background:var(--a)">A</div><select id="selA"></select><div class="coord" id="cA">–</div></div>
+      <div class="pt"><div class="dot" style="background:var(--b)">B</div><select id="selB"></select><div class="coord" id="cB">–</div></div>
+    </div>
+
+    <div class="sec"><h2>Optimise for</h2>
+      <div class="seg" id="prof">
+        <button data-p="safest" class="on">Safest</button><button data-p="balanced">Balanced</button><button data-p="fastest">Fastest</button><button data-p="all">Compare</button>
+      </div>
+      <div class="row"><span>Max slope an astronaut may walk</span><span id="msv">25°</span></div>
+      <input type="range" id="ms" min="12" max="25" step="1" value="25">
+      <div class="row"><span>EVA life-support (h)</span><span id="evv">8 h</span></div>
+      <input type="range" id="ev" min="4" max="10" step="0.5" value="8">
+      <label class="chk"><input type="checkbox" id="tSlope" checked> Show slope shading</label>
+      <label class="chk"><input type="checkbox" id="tTrav" checked> Show Perseverance traverse</label>
+      <button class="go" id="go">Find route</button>
+    </div>
+
+    <div class="sec" id="resSec" style="display:none"><h2>Route</h2>
+      <div id="res"></div>
+      <canvas id="profc"></canvas>
+      <div class="note" style="margin-top:6px">Elevation profile. Shaded = caution stretches.</div>
+    </div>
+
+    <div class="sec"><h2>How it works</h2>
+      <p class="note">Terrain: USGS/JPL Mars 2020 CTX DEM of Jezero (20 m/px), resampled here to 80 m. A* search over a 16-neighbour grid. Each step costs walking time (Tobler, slowed for a pressurised suit) + metabolic work (Minetti gradient model, Mars gravity) + risk (slope, steep descents, side-slope, roughness, closeness to cliffs). Slopes above the limit, cliffs and bad data are no-go. Rest stops are picked on flat, hazard-free ground every ~45 min.</p>
+      <p class="note">The Python version plans at the full 20 m resolution. Boulders smaller than the DEM resolution aren't visible to it, so check final routes against HiRISE imagery.</p>
+    </div>
+  </aside>
+</div>
+<script>
+"use strict";
+const R_MARS=3396190, LAT_TS=18.4663*Math.PI/180;
+const PROFILES={safest:[0.5,0.5,4.0],balanced:[1,1,1],fastest:[2,0.5,0.15]};
+const PCOL={safest:"#3fcf8e",balanced:"#5aa2ff",fastest:"#ffb547"};
+const LANDMARKS=[
+ ["landing","Octavia E. Butler landing site",18.44463,77.45089],
+ ["crater_floor","Crater floor S of landing",18.43327,77.44176],
+ ["delta_front","Front of the western delta",18.44982,77.40136],
+ ["delta_top","Top of the delta",18.47437,77.39743],
+ ["upper_fan","Upper fan",18.48965,77.34722],
+ ["rim_base","Foot of western rim climb",18.49114,77.30093],
+ ["rim_top","Top of western crater rim",18.45753,77.26853],
+ ["beyond_rim","Outside the rim",18.42760,77.23515]];
+const SUIT=0.55, MASS=140, SOFT=15;
+let M,H,W,RES,elev,slope,rough,nfrac,nogo,hazd,hsImg,slopeCanvas,nogoCanvas;
+let A=null,B=null,routes={},profile="safest",maxSlope=25,evaH=8;
+const $=id=>document.getElementById(id);
+
+// ---------------- coordinates
+function rcToLL(r,c){const x=M.x0+(c*4+2)*20, y=M.y0-(r*4+2)*20;return [y/R_MARS*180/Math.PI, x/(R_MARS*Math.cos(LAT_TS))*180/Math.PI];}
+function llToRC(lat,lon){const x=R_MARS*lon*Math.PI/180*Math.cos(LAT_TS), y=R_MARS*lat*Math.PI/180;return [((M.y0-y)/20-2)/4,((x-M.x0)/20-2)/4];}
+
+// ---------------- load
+function loadImg(src){return new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=src;});}
+function pixels(img){const c=document.createElement("canvas");c.width=img.width;c.height=img.height;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(img,0,0);return x.getImageData(0,0,c.width,c.height).data;}
+async function init(){
+  M=await (await fetch("meta.json")).json(); H=M.H; W=M.W; RES=M.res;
+  const [ie,il,ih]=await Promise.all([loadImg("elev.png"),loadImg("layers.png"),loadImg("hillshade.jpg")]);
+  hsImg=ih; const pe=pixels(ie), pl=pixels(il), N=H*W;
+  elev=new Float32Array(N); slope=new Float32Array(N); rough=new Float32Array(N); nfrac=new Float32Array(N);
+  for(let i=0;i<N;i++){elev[i]=(pe[4*i]*256+pe[4*i+1])/10-3600; slope[i]=pl[4*i]/4; rough[i]=pl[4*i+1]/20; nfrac[i]=pl[4*i+2]/255;}
+  buildSlopeCanvas(); rebuildNogo();
+  for(const s of [$("selA"),$("selB")]){s.innerHTML='<option value="">Pick a landmark or click the map</option>'+LANDMARKS.map((l,i)=>`<option value="${i}">${l[1]}</option>`).join("");}
+  setPoint("A",...llToRC(LANDMARKS[0][2],LANDMARKS[0][3])); $("selA").value="0";
+  setPoint("B",...llToRC(LANDMARKS[7][2],LANDMARKS[7][3])); $("selB").value="7";
+  fitView(); draw(); $("hud").innerHTML="Hover the map for elevation & slope";
+  run();
+}
+function buildSlopeCanvas(){
+  slopeCanvas=document.createElement("canvas");slopeCanvas.width=W;slopeCanvas.height=H;
+  const x=slopeCanvas.getContext("2d"),im=x.createImageData(W,H);
+  for(let i=0;i<H*W;i++){const s=slope[i];if(s<10)continue;const f=Math.min(1,(s-10)/15);
+    im.data[4*i]=247-f*25;im.data[4*i+1]=213-f*111;im.data[4*i+2]=138-f*80;im.data[4*i+3]=70+f*90;}
+  x.putImageData(im,0,0);
+}
+function rebuildNogo(){
+  const N=H*W; nogo=new Uint8Array(N);
+  for(let i=0;i<N;i++) nogo[i]=(slope[i]>maxSlope||nfrac[i]>0.5)?1:0;
+  // chamfer distance transform -> metres to nearest no-go cell
+  hazd=new Float32Array(N); const INF=1e9, d1=RES, d2=RES*Math.SQRT2;
+  for(let i=0;i<N;i++) hazd[i]=nogo[i]?0:INF;
+  for(let r=0;r<H;r++)for(let c=0;c<W;c++){const i=r*W+c;let v=hazd[i];
+    if(c>0)v=Math.min(v,hazd[i-1]+d1); if(r>0){v=Math.min(v,hazd[i-W]+d1); if(c>0)v=Math.min(v,hazd[i-W-1]+d2); if(c<W-1)v=Math.min(v,hazd[i-W+1]+d2);} hazd[i]=v;}
+  for(let r=H-1;r>=0;r--)for(let c=W-1;c>=0;c--){const i=r*W+c;let v=hazd[i];
+    if(c<W-1)v=Math.min(v,hazd[i+1]+d1); if(r<H-1){v=Math.min(v,hazd[i+W]+d1); if(c<W-1)v=Math.min(v,hazd[i+W+1]+d2); if(c>0)v=Math.min(v,hazd[i+W-1]+d2);} hazd[i]=v;}
+  nogoCanvas=document.createElement("canvas");nogoCanvas.width=W;nogoCanvas.height=H;
+  const x=nogoCanvas.getContext("2d"),im=x.createImageData(W,H);
+  for(let i=0;i<N;i++) if(nogo[i]){im.data[4*i]=157;im.data[4*i+1]=15;im.data[4*i+2]=44;im.data[4*i+3]=215;}
+  x.putImageData(im,0,0);
+}
+
+// ---------------- physics (same model as planner.py)
+function minetti(i){i=Math.max(-0.45,Math.min(0.45,i));return 280.5*i**5-58.7*i**4-76.8*i**3+51.9*i**2+19.6*i+2.5;}
+function tobler(i){return 6*Math.exp(-3.5*Math.abs(i+0.05));}
+const T0=tobler(0);
+function edgeCost(d,dz,u,v,w){
+  const gi=dz/d; if(Math.atan(Math.abs(gi))*180/Math.PI>maxSlope) return -1;
+  const s=(slope[u]+slope[v])/2, rg=(rough[u]+rough[v])/2, hz=Math.min(hazd[u],hazd[v]);
+  const tn=T0/tobler(gi), en=minetti(gi)/2.5, st=Math.tan(s*Math.PI/180);
+  const cross=Math.atan(Math.sqrt(Math.max(st*st-gi*gi,0)))*180/Math.PI;
+  const down=-Math.atan(gi)*180/Math.PI-8;
+  const risk=(s/SOFT)**3+(down>0?(down/7)**2:0)+(cross/12)**2+(rg/1.5)**2+2*Math.exp(-hz/80);
+  return d*(w[0]*tn+w[1]*en+w[2]*risk);
+}
+function hFactor(w){let m=1e9;for(let g=-0.47;g<=0.47;g+=0.0005)m=Math.min(m,w[0]*T0/tobler(g)+w[1]*minetti(g)/2.5);return m*0.999;}
+const MOVES=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1],[-2,-1],[-2,1],[2,-1],[2,1],[-1,-2],[1,-2],[-1,2],[1,2]];
+
+// ---------------- A* with an indexed binary heap
+function astar(s,g,w){
+  const N=H*W, G=new Float64Array(N).fill(Infinity), P=new Int32Array(N).fill(-1), pos=new Int32Array(N).fill(-1);
+  const hk=new Float64Array(N), hn=new Int32Array(N); let size=0;
+  const hf=hFactor(w)*RES, gr=(g/W)|0, gc=g%W;
+  const sw=(a,b)=>{const k=hk[a];hk[a]=hk[b];hk[b]=k;const n=hn[a];hn[a]=hn[b];hn[b]=n;pos[hn[a]]=a;pos[hn[b]]=b;};
+  const up=i=>{while(i>0){const p=(i-1)>>1;if(hk[p]<=hk[i])break;sw(p,i);i=p;}};
+  const push=(k,n)=>{hk[size]=k;hn[size]=n;pos[n]=size;up(size);size++;};
+  const pop=()=>{const n=hn[0];pos[n]=-2;size--;if(size>0){hk[0]=hk[size];hn[0]=hn[size];pos[hn[0]]=0;let i=0;
+    for(;;){const l=2*i+1,r=l+1;let m=i;if(l<size&&hk[l]<hk[m])m=l;if(r<size&&hk[r]<hk[m])m=r;if(m===i)break;sw(m,i);i=m;}}return n;};
+  G[s]=0;push(0,s);
+  while(size>0){const u=pop();if(u===g)break;const ur=(u/W)|0,uc=u%W;
+    for(const [dr,dc] of MOVES){const vr=ur+dr,vc=uc+dc;if(vr<0||vr>=H||vc<0||vc>=W)continue;const v=vr*W+vc;
+      if(nogo[v]||pos[v]===-2)continue;
+      if(Math.abs(dr)+Math.abs(dc)===3){ if(Math.abs(dr)===2){if(nogo[(ur+dr/2)*W+uc]||nogo[(ur+dr/2)*W+vc])continue;}
+        else{if(nogo[ur*W+uc+dc/2]||nogo[vr*W+uc+dc/2])continue;} }
+      const d=RES*Math.hypot(dr,dc), c=edgeCost(d,elev[v]-elev[u],u,v,w); if(c<0)continue;
+      const ng=G[u]+c; if(ng<G[v]){G[v]=ng;P[v]=u;const k=ng+hf*Math.hypot(vr-gr,vc-gc);
+        if(pos[v]>=0){hk[pos[v]]=k;up(pos[v]);}else push(k,v);}}}
+  if(P[g]<0&&g!==s) return null;
+  const path=[g];while(path[path.length-1]!==s)path.push(P[path[path.length-1]]);return path.reverse();
+}
+
+// ---------------- smoothing (string pulling that never raises cost)
+function bil(r,c){r=Math.min(Math.max(r,0),H-1.001);c=Math.min(Math.max(c,0),W-1.001);const i=r|0,j=c|0,fr=r-i,fc=c-j;
+  return elev[i*W+j]*(1-fr)*(1-fc)+elev[(i+1)*W+j]*fr*(1-fc)+elev[i*W+j+1]*(1-fr)*fc+elev[(i+1)*W+j+1]*fr*fc;}
+function polyCost(R,C,w){let t=0;for(let k=0;k<R.length-1;k++){const d=RES*Math.hypot(R[k+1]-R[k],C[k+1]-C[k]);if(!d)continue;
+  const u=Math.round(R[k])*W+Math.round(C[k]),v=Math.round(R[k+1])*W+Math.round(C[k+1]);if(nogo[u]||nogo[v])return Infinity;
+  const c=edgeCost(d,bil(R[k+1],C[k+1])-bil(R[k],C[k]),u,v,w);if(c<0)return Infinity;t+=c;}return t;}
+function linePts(r0,c0,r1,c1){const n=Math.max(1,Math.ceil(Math.hypot(r1-r0,c1-c0)));const R=[],C=[];for(let k=0;k<=n;k++){R.push(r0+(r1-r0)*k/n);C.push(c0+(c1-c0)*k/n);}return [R,C];}
+function smooth(path,w){const R=path.map(p=>(p/W)|0),C=path.map(p=>p%W);const oR=[R[0]],oC=[C[0]];let i=0;const n=R.length;
+  while(i<n-1){let best=i+1;for(let j=Math.min(n-1,i+40);j>i+1;j--){const [lr,lc]=linePts(R[i],C[i],R[j],C[j]);
+      if(polyCost(lr,lc,w)<=polyCost(R.slice(i,j+1),C.slice(i,j+1),w)){best=j;break;}}
+    const [lr,lc]=linePts(R[i],C[i],R[best],C[best]);for(let k=1;k<lr.length;k++){oR.push(lr[k]);oC.push(lc[k]);}i=best;}
+  return [oR,oC];}
+
+// ---------------- metrics
+function report(R,C){
+  const n=R.length,z=R.map((r,k)=>bil(r,C[k])),cd=[0],ct=[0];let E=0,asc=0,des=0,gmax=0,gmin=0,smax=0,hmin=1e9;const gr=[];
+  for(let k=0;k<n-1;k++){const d=RES*Math.hypot(R[k+1]-R[k],C[k+1]-C[k]),dz=z[k+1]-z[k],g=d?dz/d:0,gd=Math.atan(g)*180/Math.PI;gr.push(gd);
+    cd.push(cd[k]+d);ct.push(ct[k]+d/(tobler(g)*SUIT/3.6));E+=minetti(g)*MASS*d*(3.721/9.81);if(dz>0)asc+=dz;else des-=dz;gmax=Math.max(gmax,gd);gmin=Math.min(gmin,gd);}
+  const cells=R.map((r,k)=>Math.round(r)*W+Math.round(C[k]));
+  for(const i of cells){smax=Math.max(smax,slope[i]);hmin=Math.min(hmin,hazd[i]);}
+  const hrs=ct[n-1]/3600,budget=evaH*0.7;
+  const verdict=hrs<=budget*0.5?["ok","GO: fits one EVA with time to walk back"]:hrs<=budget?["warn","One-way only: fits the EVA, but not a walk back"]:["no","NO-GO on foot: over the EVA budget, needs a rover or staging point"];
+  const caution=[];let k=0;while(k<gr.length){const bad=j=>Math.abs(gr[j])>SOFT||hazd[cells[j+1]]<100||rough[cells[j+1]]>2.5;
+    if(bad(k)){let j=k;while(j<gr.length&&bad(j))j++;let why=[];const sl=gr.slice(k,j).map(Math.abs);if(Math.max(...sl)>SOFT)why.push(`grade up to ${Math.max(...sl).toFixed(0)}°`);
+      if(cells.slice(k+1,j+1).some(i=>hazd[i]<100))why.push("near cliff / no-go ground");if(cells.slice(k+1,j+1).some(i=>rough[i]>2.5))why.push("rough surface");
+      caution.push([cd[k]/1000,cd[j]/1000,why.join(", ")]);k=j;}else k++;}
+  const stops=[];for(let t=2700;t<ct[n-1]-600;t+=2700){let k2=ct.findIndex(v=>v>=t);let best=k2,bs=1e9;for(let j=Math.max(0,k2-5);j<Math.min(n,k2+5);j++){const sc=slope[cells[j]]-0.02*Math.min(hazd[cells[j]],300);if(sc<bs){bs=sc;best=j;}}stops.push(best);}
+  return {R,C,z,cd,dist:cd[n-1]/1000,hrs,E:E/1000,asc,des,gmax,gmin:-gmin,smax,hmin,verdict,caution,stops,straight:RES*Math.hypot(R[n-1]-R[0],C[n-1]-C[0])/1000};
+}
+
+// ---------------- run
+function toast(m,ms=2500){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display="none",ms);}
+function snap(p){let [r,c]=p.map(Math.round);if(!nogo[r*W+c])return r*W+c;for(let rad=1;rad<20;rad++)for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){const rr=r+dr,cc=c+dc;if(rr>=0&&rr<H&&cc>=0&&cc<W&&!nogo[rr*W+cc])return rr*W+cc;}return -1;}
+function run(){
+  if(!A||!B){toast("Set both A and B first");return;}
+  $("go").disabled=true;$("go").textContent="Searching…";
+  setTimeout(()=>{
+    const s=snap(A),g=snap(B);routes={};
+    if(s<0||g<0){toast("A point sits inside a large no-go area");}
+    else{const ps=profile==="all"?["safest","balanced","fastest"]:[profile];
+      for(const p of ps){const path=astar(s,g,PROFILES[p]);if(!path){toast("No safe walking route under these limits",4000);break;}
+        const [R,C]=smooth(path,PROFILES[p]);routes[p]=report(R,C);}}
+    showResults();draw();$("go").disabled=false;$("go").textContent="Find route";},30);
+}
+function showResults(){
+  const ks=Object.keys(routes);$("resSec").style.display=ks.length?"block":"none";if(!ks.length)return;
+  $("res").innerHTML=ks.map(p=>{const r=routes[p];return `<div class="card" style="--c:${PCOL[p]}"><div class="t"><span>${p}</span><span>${r.dist.toFixed(2)} km</span></div>
+    <div class="verdict ${r.verdict[0]}">${r.verdict[1]}</div>
+    <div class="kv"><div><small>Walking time</small><b>${Math.floor(r.hrs)}h ${String(Math.round(r.hrs%1*60)).padStart(2,"0")}m</b></div>
+    <div><small>Energy</small><b>${(r.E/4.184).toFixed(0)} kcal</b></div>
+    <div><small>Climb / descent</small><b>+${r.asc.toFixed(0)} / −${r.des.toFixed(0)} m</b></div>
+    <div><small>Steepest up / down</small><b>${r.gmax.toFixed(0)}° / ${r.gmin.toFixed(0)}°</b></div>
+    <div><small>Closest to hazard</small><b>${r.hmin.toFixed(0)} m</b></div>
+    <div><small>Detour vs straight</small><b>+${((r.dist/r.straight-1)*100).toFixed(0)}%</b></div></div>
+    <div class="note" style="margin-top:6px">${r.stops.length} rest stop${r.stops.length===1?"":"s"} (white dots on the map)</div>
+    ${r.caution.length?`<ul class="caut">${r.caution.slice(0,5).map(c=>`<li>km ${c[0].toFixed(1)}–${c[1].toFixed(1)}: ${c[2]}</li>`).join("")}</ul>`:""}</div>`;}).join("");
+  drawProfile();
+}
+function drawProfile(){
+  const cv=$("profc"),dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*dpr;cv.height=h*dpr;const x=cv.getContext("2d");x.scale(dpr,dpr);
+  const rs=Object.entries(routes);if(!rs.length)return;
+  let zmin=1e9,zmax=-1e9,dmax=0;for(const [,r] of rs){for(const z of r.z){zmin=Math.min(zmin,z);zmax=Math.max(zmax,z);}dmax=Math.max(dmax,r.dist);}
+  const pl=44,pr=8,pt=8,pb=20,X=d=>pl+(w-pl-pr)*d/dmax,Y=z=>pt+(h-pt-pb)*(1-(z-zmin)/((zmax-zmin)||1));
+  x.font="10px IBM Plex Mono";x.fillStyle="#a89485";x.strokeStyle="#3a2a23";
+  for(let k=0;k<=3;k++){const z=zmin+(zmax-zmin)*k/3;x.beginPath();x.moveTo(pl,Y(z));x.lineTo(w-pr,Y(z));x.stroke();x.fillText(z.toFixed(0),2,Y(z)+3);}
+  x.fillText("0 km",pl,h-5);x.fillText(dmax.toFixed(1)+" km",w-pr-40,h-5);
+  for(const [p,r] of rs){x.fillStyle=PCOL[p]+"30";for(const c of r.caution)x.fillRect(X(c[0]),pt,Math.max(2,X(c[1])-X(c[0])),h-pt-pb);
+    x.strokeStyle=PCOL[p];x.lineWidth=2;x.beginPath();r.z.forEach((z,k)=>{const px=X(r.cd[k]/1000),py=Y(z);k?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();}
+}
+
+// ---------------- map view
+const cv=$("map"),ctx=cv.getContext("2d");let view={s:1,ox:0,oy:0};
+function resize(){const dpr=devicePixelRatio||1;cv.width=cv.clientWidth*dpr;cv.height=cv.clientHeight*dpr;draw();}
+function fitView(){const cw=cv.clientWidth,ch=cv.clientHeight;
+  // frame the area around the default route and the delta
+  const r0=Math.min(A[0],B[0])-60,r1=Math.max(A[0],B[0])+60,c0=Math.min(A[1],B[1])-40,c1=Math.max(A[1],B[1])+40;
+  view.s=Math.min(cw/(c1-c0),ch/(r1-r0));view.ox=cw/2-view.s*(c0+c1)/2;view.oy=ch/2-view.s*(r0+r1)/2;}
+const toScr=(r,c)=>[view.ox+view.s*(c+0.5),view.oy+view.s*(r+0.5)];
+const toGrid=(x,y)=>[(y-view.oy)/view.s-0.5,(x-view.ox)/view.s-0.5];
+function draw(){
+  if(!M)return;const dpr=devicePixelRatio||1;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle="#000";ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+  ctx.imageSmoothingEnabled=view.s<3;
+  ctx.drawImage(hsImg,view.ox,view.oy,W*view.s,H*view.s);
+  ctx.fillStyle="rgba(190,90,40,0.16)";ctx.fillRect(view.ox,view.oy,W*view.s,H*view.s);
+  if($("tSlope").checked)ctx.drawImage(slopeCanvas,view.ox,view.oy,W*view.s,H*view.s);
+  ctx.drawImage(nogoCanvas,view.ox,view.oy,W*view.s,H*view.s);
+  if($("tTrav").checked){ctx.setLineDash([5,4]);ctx.strokeStyle="#00e5ff";ctx.lineWidth=1.4;ctx.beginPath();M.traverse.forEach(([r,c],k)=>{const [x,y]=toScr(r,c);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.setLineDash([]);}
+  for(const [p,r] of Object.entries(routes)){for(const [col,lw] of [["rgba(0,0,0,.6)",6],[PCOL[p],3]]){ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.lineJoin="round";ctx.beginPath();
+      r.R.forEach((rr,k)=>{const [x,y]=toScr(rr,r.C[k]);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+    for(const k of r.stops){const [x,y]=toScr(r.R[k],r.C[k]);ctx.fillStyle="#fff";ctx.strokeStyle=PCOL[p];ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill();ctx.stroke();}}
+  for(const [P,lab,col] of [[A,"A","#2fd3ff"],[B,"B","#ff4fd8"]]){if(!P)continue;const [x,y]=toScr(...P);
+    ctx.fillStyle=col;ctx.strokeStyle="#000";ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,11,0,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#000";ctx.font="600 12px IBM Plex Mono";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(lab,x,y+1);}
+  // scale bar
+  const km=[1,2,5,10].find(k=>k*1000/RES*view.s>70)||10,px=km*1000/RES*view.s,bx=cv.clientWidth-px-20,by=cv.clientHeight-22;
+  ctx.fillStyle="rgba(18,13,11,.8)";ctx.fillRect(bx-8,by-18,px+16,30);ctx.fillStyle="#f1e6dc";ctx.fillRect(bx,by,px,3);
+  ctx.font="11px IBM Plex Mono";ctx.textAlign="center";ctx.textBaseline="alphabetic";ctx.fillText(km+" km",bx+px/2,by-5);
+}
+function setPoint(which,r,c){r=Math.max(0,Math.min(H-1,r));c=Math.max(0,Math.min(W-1,c));
+  if(which==="A")A=[r,c];else B=[r,c];const [lat,lon]=rcToLL(r,c);
+  $("c"+which).textContent=`${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E · ${elev[Math.round(r)*W+Math.round(c)].toFixed(0)} m`;}
+let drag=null,next="A";
+cv.addEventListener("pointerdown",e=>{drag={x:e.offsetX,y:e.offsetY,ox:view.ox,oy:view.oy,moved:false};cv.setPointerCapture(e.pointerId);});
+cv.addEventListener("pointermove",e=>{
+  if(drag){const dx=e.offsetX-drag.x,dy=e.offsetY-drag.y;if(Math.abs(dx)+Math.abs(dy)>4)drag.moved=true;if(drag.moved){view.ox=drag.ox+dx;view.oy=drag.oy+dy;draw();}return;}
+  if(!M)return;const [r,c]=toGrid(e.offsetX,e.offsetY),ri=Math.round(r),ci=Math.round(c);
+  if(ri<0||ri>=H||ci<0||ci>=W){$("hud").textContent="outside DEM";return;}const i=ri*W+ci,[lat,lon]=rcToLL(r,c);
+  $("hud").innerHTML=`<b>${lat.toFixed(4)}°N ${lon.toFixed(4)}°E</b> · elev <b>${elev[i].toFixed(0)} m</b> · slope <b>${slope[i].toFixed(1)}°</b>${nogo[i]?' · <b style="color:#ff7d7d">NO-GO</b>':""}`;});
+cv.addEventListener("pointerup",e=>{const d=drag;drag=null;if(!d||d.moved||!M)return;const [r,c]=toGrid(e.offsetX,e.offsetY);
+  if(r<0||r>=H||c<0||c>=W)return;setPoint(next,r,c);$("sel"+next).value="";next=next==="A"?"B":"A";routes={};showResults();draw();
+  if(next==="A")run();});
+cv.addEventListener("wheel",e=>{e.preventDefault();const f=Math.exp(-e.deltaY*0.0015),ns=Math.min(30,Math.max(0.15,view.s*f)),k=ns/view.s;
+  view.ox=e.offsetX-(e.offsetX-view.ox)*k;view.oy=e.offsetY-(e.offsetY-view.oy)*k;view.s=ns;draw();},{passive:false});
+for(const w of ["A","B"])$("sel"+w).addEventListener("change",e=>{const l=LANDMARKS[+e.target.value];if(!l)return;setPoint(w,...llToRC(l[2],l[3]));routes={};showResults();draw();});
+$("prof").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;profile=b.dataset.p;document.querySelectorAll("#prof button").forEach(x=>x.classList.toggle("on",x===b));run();});
+$("ms").addEventListener("input",e=>{maxSlope=+e.target.value;$("msv").textContent=maxSlope+"°";});
+$("ms").addEventListener("change",()=>{rebuildNogo();routes={};draw();run();});
+$("ev").addEventListener("input",e=>{evaH=+e.target.value;$("evv").textContent=evaH+" h";if(Object.keys(routes).length)run();});
+$("tSlope").addEventListener("change",draw);$("tTrav").addEventListener("change",draw);
+$("go").addEventListener("click",run);
+addEventListener("resize",resize);
+resize();
+init().catch(err=>{$("hud").textContent="Failed to load terrain: "+err;});
+</script>
+</body>
+</html>

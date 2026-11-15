@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# big / generated data (get it with: python get_data.py)
+data/*.tif
+data/*.npz
+data/app_cache/
+*.part
+
+# generated maps
+output/
+
+# macOS
+.DS_Store

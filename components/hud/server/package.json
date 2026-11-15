@@ -1,0 +1,9 @@
+{
+  "name": "eva-hud-base-server",
+  "version": "0.1.0",
+  "description": "Mock base-station server for the Mars EVA HUD (serves the app, mission file and a WebSocket link).",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" },
+  "license": "MIT"
+}

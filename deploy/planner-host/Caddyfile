@@ -1,0 +1,24 @@
+# Planner host: one domain, automatic https (Caddy). Path-based routing:
+#   /              -> Jezero mission planner (interactive map, lander terminal, /mission/* API)
+#   /map/          -> static in-browser map (no server needed; files from components/planner/web)
+#   /pathfinder/   -> legacy Jezero pathfinder (its own app, same terrain data)
+# Upstreams and the map folder are environment variables with compose service names as defaults,
+# so this same file can be tested locally against 127.0.0.1 (see tests/integration_check.py).
+{$PLANNER_DOMAIN} {
+	encode gzip
+	redir /pathfinder /pathfinder/ permanent
+	handle_path /pathfinder/* {
+		reverse_proxy {$PATHFINDER_UPSTREAM:pathfinder:8051}
+	}
+	handle_path /map/* {
+		root * {$MAP_ROOT:/srv/map}
+		file_server
+	}
+	handle {
+		reverse_proxy {$PLANNER_UPSTREAM:planner:8050} {
+			transport http {
+				response_header_timeout 300s
+			}
+		}
+	}
+}

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+node_modules/
+output/
+data/app_cache/
+data/*.tif
+data/*.npz
+.env

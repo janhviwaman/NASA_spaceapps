@@ -1,0 +1,37 @@
+# Publishes the secondary HUD (components/hud, the mars-eva-hud app) to GitHub Pages.
+# The MVP HUD is the primary HUD and runs on Render (see render.yaml); it is not published here.
+name: Deploy HUD to GitHub Pages
+on:
+  push:
+    branches: [main]
+    paths: ["components/hud/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage the app (the app files only, no server or tools)
+        run: |
+          mkdir -p site
+          cp -r components/hud/. site/
+          rm -rf site/server site/tools site/examples
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

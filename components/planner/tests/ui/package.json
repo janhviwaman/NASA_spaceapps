@@ -1,0 +1,2 @@
+{ "name": "mission-ui-smoke", "private": true, "description": "Headless smoke test of mission_ui.html (jsdom)",
+  "dependencies": { "jsdom": "^31.0.0", "@napi-rs/canvas": "^0.1.0" } }

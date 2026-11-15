@@ -1,0 +1,74 @@
+# Planner host: planner + pathfinder + static map + automatic https, on one server.
+# Setup:   cp .env.example .env   (edit it)   then   docker compose up -d --build
+# The HUD (GitHub Pages) and the MVP (Render) are deployed separately; see docs/HOSTING.md.
+x-data-volume: &data
+  type: bind
+  source: ../../shared-data
+  target: /app/data
+
+services:
+  # One-shot: fetch the 90 MB CTX DEM once (or create the synthetic test terrain). Both apps wait for it.
+  data:
+    build: ../../components/planner
+    restart: "no"
+    environment:
+      SYNTHETIC: ${SYNTHETIC:-}
+    command:
+      - sh
+      - -c
+      - >-
+        if [ -n "$$SYNTHETIC" ]; then
+        python -c "import sys; sys.path.insert(0,'tests'); import synth_dem; synth_dem.make('data/M20_JezeroCrater_CTXDEM_20m.tif')";
+        else python get_data.py; fi
+    volumes:
+      - *data
+
+  planner:
+    build: ../../components/planner
+    restart: unless-stopped
+    depends_on:
+      data:
+        condition: service_completed_successfully
+    environment:
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-*}
+      API_KEY: ${API_KEY:-}
+      SYNTHETIC: ${SYNTHETIC:-}
+    command:
+      - sh
+      - -c
+      - >-
+        if [ -n "$$SYNTHETIC" ]; then python app.py --host 0.0.0.0 --no-browser --synthetic;
+        else python app.py --host 0.0.0.0 --no-browser; fi
+    volumes:
+      - *data
+      - planner-cache:/app/data/app_cache      # own cache: the planner and pathfinder cache formats differ
+
+  pathfinder:
+    build: ../../components/pathfinder
+    restart: unless-stopped
+    depends_on:
+      data:
+        condition: service_completed_successfully
+    environment:
+      PORT: "8051"
+    command: ["python", "app.py", "--host", "0.0.0.0", "--no-browser", "--port", "8051"]
+    volumes:
+      - *data
+      - pathfinder-cache:/app/data/app_cache
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [planner, pathfinder]
+    ports: ["80:80", "443:443"]
+    environment:
+      PLANNER_DOMAIN: ${PLANNER_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../components/planner/web:/srv/map:ro
+      - caddy-data:/data
+
+volumes:
+  planner-cache:
+  pathfinder-cache:
+  caddy-data:

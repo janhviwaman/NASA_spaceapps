@@ -1,0 +1,8 @@
+numpy
+scipy
+rasterio
+numba
+matplotlib
+pandas
+pillow
+affine
